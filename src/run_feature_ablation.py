@@ -16,6 +16,7 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--band-stats-root", default=None)
     parser.add_argument("--output", default="outputs/feature_ablation/results.csv")
     args = parser.parse_args()
     run(args)

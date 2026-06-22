@@ -71,6 +71,7 @@ def run(args) -> Path:
         pretrained=False,
         use_amp=False,
         seed=args.seed,
+        band_stats_root=args.band_stats_root,
     )
     dataframe = load_train_dataframe(base_config)
     fold = build_folds(base_config, dataframe)[args.fold]
@@ -83,7 +84,7 @@ def run(args) -> Path:
         args.seed + 1,
     )
 
-    stats_path = base_config.model_dir / f"band_stats_fold{args.fold}.json"
+    stats_path = base_config.band_stats_dir / f"band_stats_fold{args.fold}.json"
     if not stats_path.exists():
         print(f"Computing lightweight fold statistics: {stats_path}")
         stats = compute_band_stats(

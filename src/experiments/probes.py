@@ -23,6 +23,7 @@ def run_unet_probe(args) -> dict:
         use_amp=False,
         stats_samples_per_satellite=300,
         unet_model_subdir="unet_probe",
+        band_stats_root=args.band_stats_root,
     )
     dataframe = load_train_dataframe(config)
     sampled, fold = build_sampled_location_fold(
@@ -58,6 +59,7 @@ def run_convnext_probe(args) -> dict:
         use_amp=False,
         stats_samples_per_satellite=200,
         convnext_model_subdir="convnext_probe",
+        band_stats_root=args.band_stats_root,
     )
     dataframe = load_train_dataframe(config)
     sampled, fold = build_sampled_location_fold(

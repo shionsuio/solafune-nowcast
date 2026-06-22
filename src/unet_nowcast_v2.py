@@ -171,7 +171,7 @@ def train_unet_fold(
     train_frame = dataframe.iloc[fold["train_indices"]].copy()
     validation_frame = dataframe.iloc[fold["validation_indices"]].copy()
     directories = satellite_directories(config, "train")
-    stats_path = model_dir / f"band_stats_fold{fold_index}.json"
+    stats_path = config.band_stats_dir / f"band_stats_fold{fold_index}.json"
     if stats_path.exists():
         stats = load_stats(stats_path)
     else:
@@ -308,7 +308,7 @@ def predict_unet_fold(
     ).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
-    stats = load_stats(model_dir / f"band_stats_fold{fold}.json")
+    stats = load_stats(config.band_stats_dir / f"band_stats_fold{fold}.json")
     dataset = NowcastingDataset(
         dataframe,
         satellite_directories(config, "evaluation"),

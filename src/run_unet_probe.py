@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--encoder-size", type=int, default=96)
     parser.add_argument("--base-channels", type=int, default=32)
+    parser.add_argument("--band-stats-root", default=None)
     args = parser.parse_args()
     run_unet_probe(args)
 

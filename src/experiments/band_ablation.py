@@ -62,6 +62,7 @@ def run(args) -> Path:
         pretrained=False,
         use_amp=False,
         seed=args.seed,
+        band_stats_root=args.band_stats_root,
     )
     dataframe = load_train_dataframe(base_config)
     fold = build_folds(base_config, dataframe)[args.fold]
@@ -79,7 +80,7 @@ def run(args) -> Path:
 
     stats_by_mode = {}
     for band_mode in ("legacy3", "matched6"):
-        stats_path = output_path.parent / f"stats_{band_mode}_fold{args.fold}.json"
+        stats_path = base_config.band_stats_dir / f"stats_{band_mode}_fold{args.fold}.json"
         config = replace(base_config, band_mode=band_mode)
         if stats_path.exists():
             stats = load_stats(stats_path)

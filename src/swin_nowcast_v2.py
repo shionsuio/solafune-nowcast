@@ -79,6 +79,7 @@ class Config:
     use_satellite_normalization: bool = True
     unet_model_subdir: str = "unet_v2"
     convnext_model_subdir: str = "convnext_v2"
+    band_stats_root: str | None = None
 
     @property
     def paths(self) -> WorkspacePaths:
@@ -87,6 +88,11 @@ class Config:
     @property
     def model_dir(self) -> Path:
         return self.paths.models_dir / "swin_v2"
+
+    @property
+    def band_stats_dir(self) -> Path:
+        stats_root = self.band_stats_root or os.environ.get("SOLAFUNE_BAND_STATS_ROOT")
+        return Path(stats_root) if stats_root else self.model_dir
 
 
 def seed_everything(seed: int) -> None:
@@ -594,7 +600,7 @@ def train_fold(
     train_frame = dataframe.iloc[fold["train_indices"]].copy()
     validation_frame = dataframe.iloc[fold["validation_indices"]].copy()
     train_directories = satellite_directories(config, "train")
-    stats_path = config.model_dir / f"band_stats_fold{fold['fold']}.json"
+    stats_path = config.band_stats_dir / f"band_stats_fold{fold['fold']}.json"
     if stats_path.exists():
         stats = load_stats(stats_path)
     else:
@@ -758,7 +764,7 @@ def load_fold_model(
     model = SwinNowcaster(config).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
-    stats = load_stats(config.model_dir / f"band_stats_fold{fold}.json")
+    stats = load_stats(config.band_stats_dir / f"band_stats_fold{fold}.json")
     return model, stats
 
 
