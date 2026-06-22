@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
 
-from run_feature_ablation import balanced_sample
+from experiment_utils import balanced_sample, build_folds, load_train_dataframe
 from swin_nowcast_v2 import (
     Config,
     NowcastingDataset,
@@ -23,10 +23,8 @@ from swin_nowcast_v2 import (
     get_band_mapping,
     get_device,
     load_stats,
-    make_folds,
     make_loader,
     original_scale_rmse,
-    prepare_metadata,
     satellite_directories,
     save_stats,
     seed_everything,
@@ -99,8 +97,8 @@ def main() -> None:
         use_amp=False,
         seed=args.seed,
     )
-    dataframe = prepare_metadata(base_config.paths.train_dir / "train_dataset.csv")
-    fold = make_folds(dataframe, base_config.n_folds)[args.fold]
+    dataframe = load_train_dataframe(base_config)
+    fold = build_folds(base_config, dataframe)[args.fold]
     fold_train = dataframe.iloc[fold["train_indices"]]
     train_frame = balanced_sample(fold_train, args.train_rows, args.seed)
     validation_frame = balanced_sample(

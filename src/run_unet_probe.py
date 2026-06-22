@@ -8,8 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from run_feature_ablation import balanced_sample
-from swin_nowcast_v2 import Config, get_device, make_folds, prepare_metadata
+from experiment_utils import balanced_sample, build_folds, load_train_dataframe
+from swin_nowcast_v2 import Config, get_device
 from unet_nowcast_v2 import UNetNowcaster, train_unet_fold
 
 
@@ -37,8 +37,8 @@ def main() -> None:
         stats_samples_per_satellite=300,
         unet_model_subdir="unet_probe",
     )
-    dataframe = prepare_metadata(config.paths.train_dir / "train_dataset.csv")
-    original_fold = make_folds(dataframe, config.n_folds)[args.fold]
+    dataframe = load_train_dataframe(config)
+    original_fold = build_folds(config, dataframe)[args.fold]
     train_frame = balanced_sample(
         dataframe.iloc[original_fold["train_indices"]], args.train_rows, config.seed
     )

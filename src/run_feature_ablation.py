@@ -23,6 +23,7 @@ import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
 
+from experiment_utils import balanced_sample, build_folds, load_train_dataframe
 from swin_nowcast_v2 import (
     Config,
     NowcastingDataset,
@@ -30,10 +31,8 @@ from swin_nowcast_v2 import (
     compute_band_stats,
     get_device,
     load_stats,
-    make_folds,
     make_loader,
     original_scale_rmse,
-    prepare_metadata,
     save_stats,
     satellite_directories,
     seed_everything,
@@ -70,25 +69,6 @@ EXPERIMENTS = {
         "use_missing_flag": True,
     },
 }
-
-
-def balanced_sample(
-    dataframe: pd.DataFrame, total_rows: int, seed: int
-) -> pd.DataFrame:
-    per_satellite = max(total_rows // dataframe["satellite_target"].nunique(), 1)
-    sampled = []
-    for satellite, group in dataframe.groupby("satellite_target"):
-        sampled.append(
-            group.sample(
-                min(per_satellite, len(group)),
-                random_state=seed,
-            )
-        )
-    return (
-        pd.concat(sampled)
-        .sample(frac=1, random_state=seed)
-        .reset_index(drop=True)
-    )
 
 
 def evaluate(model, loader, device) -> float:
@@ -134,8 +114,8 @@ def main() -> None:
         use_amp=False,
         seed=args.seed,
     )
-    dataframe = prepare_metadata(base_config.paths.train_dir / "train_dataset.csv")
-    fold = make_folds(dataframe, base_config.n_folds)[args.fold]
+    dataframe = load_train_dataframe(base_config)
+    fold = build_folds(base_config, dataframe)[args.fold]
     train_frame = balanced_sample(
         dataframe.iloc[fold["train_indices"]], args.train_rows, args.seed
     )

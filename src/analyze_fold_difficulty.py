@@ -11,7 +11,8 @@ import pandas as pd
 import rasterio
 from tqdm.auto import tqdm
 
-from swin_nowcast_v2 import Config, make_folds, prepare_metadata
+from experiment_utils import build_folds, load_train_dataframe
+from swin_nowcast_v2 import Config
 
 
 def main() -> None:
@@ -24,9 +25,9 @@ def main() -> None:
     output_dir = root / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     config = Config(root=str(root))
-    dataframe = prepare_metadata(config.paths.train_dir / "train_dataset.csv")
+    dataframe = load_train_dataframe(config)
     fold_by_location = {}
-    for fold in make_folds(dataframe, config.n_folds):
+    for fold in build_folds(config, dataframe):
         for location in fold["validation_locations"]:
             fold_by_location[location] = fold["fold"]
     dataframe["fold"] = dataframe["name_location"].map(fold_by_location)
