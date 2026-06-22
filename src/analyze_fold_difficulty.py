@@ -24,7 +24,7 @@ def main() -> None:
     output_dir = root / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     config = Config(root=str(root))
-    dataframe = prepare_metadata(config.train_dir / "train_dataset.csv")
+    dataframe = prepare_metadata(config.paths.train_dir / "train_dataset.csv")
     fold_by_location = {}
     for fold in make_folds(dataframe, config.n_folds):
         for location in fold["validation_locations"]:
@@ -32,7 +32,7 @@ def main() -> None:
     dataframe["fold"] = dataframe["name_location"].map(fold_by_location)
 
     rows = []
-    gpm_dir = config.train_dir / "gpm_imerg"
+    gpm_dir = config.paths.train_dir / "gpm_imerg"
     for row in tqdm(
         dataframe.itertuples(index=False),
         total=len(dataframe),

@@ -36,7 +36,7 @@ def main() -> None:
         stats_samples_per_satellite=200,
         convnext_model_subdir="convnext_probe",
     )
-    dataframe = prepare_metadata(config.train_dir / "train_dataset.csv")
+    dataframe = prepare_metadata(config.paths.train_dir / "train_dataset.csv")
     original_fold = make_folds(dataframe, config.n_folds)[args.fold]
     train_frame = balanced_sample(
         dataframe.iloc[original_fold["train_indices"]],

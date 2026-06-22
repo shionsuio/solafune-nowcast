@@ -167,7 +167,7 @@ class ConvNeXtNowcaster(nn.Module):
 
 
 def convnext_model_dir(config: Config) -> Path:
-    return config.root_path / "models" / config.convnext_model_subdir
+    return config.paths.models_dir / config.convnext_model_subdir
 
 
 def train_convnext_fold(

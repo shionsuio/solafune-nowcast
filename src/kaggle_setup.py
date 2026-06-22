@@ -12,34 +12,15 @@ import argparse
 import shutil
 from pathlib import Path
 
-
-REQUIRED_PATHS = (
-    ("train_dataset", "train_dataset.csv"),
-    ("evaluation_dataset", "evaluation_target.csv"),
-    ("sample_submission", "evaluation_target.csv"),
+from project_paths import (
+    SOLAFUNE_DATA_FOLDERS,
+    SOLAFUNE_REQUIRED_FILES,
+    find_solafune_input_root,
 )
-REQUIRED_DIRS = ("train_dataset", "evaluation_dataset", "sample_submission")
-REQUIRED_SAMPLE_SUBDIRS = ("test_files",)
 
 
 def detect_kaggle_input_root(search_root: Path = Path("/kaggle/input")) -> Path:
-    """Return the mounted dataset directory that contains Solafune assets."""
-    if not search_root.exists():
-        raise FileNotFoundError(f"Input mount not found: {search_root}")
-
-    for candidate in sorted(search_root.iterdir()):
-        if not candidate.is_dir():
-            continue
-        if all((candidate / folder / filename).exists() for folder, filename in REQUIRED_PATHS):
-            if all((candidate / folder).is_dir() for folder in REQUIRED_DIRS) and all(
-                (candidate / "sample_submission" / subdir).is_dir()
-                for subdir in REQUIRED_SAMPLE_SUBDIRS
-            ):
-                return candidate
-
-    raise FileNotFoundError(
-        f"Could not find a Kaggle dataset under {search_root} with the expected Solafune layout"
-    )
+    return find_solafune_input_root(search_root)
 
 
 def ensure_kaggle_workspace(
@@ -51,7 +32,7 @@ def ensure_kaggle_workspace(
     workspace_root.mkdir(parents=True, exist_ok=True)
     input_root = input_root or detect_kaggle_input_root()
 
-    for folder, _ in REQUIRED_PATHS:
+    for folder in SOLAFUNE_DATA_FOLDERS:
         source = input_root / folder
         destination = workspace_root / folder
         if destination.exists() or destination.is_symlink():
@@ -78,7 +59,7 @@ def main() -> int:
     input_root = Path(args.input_root) if args.input_root else None
     resolved = ensure_kaggle_workspace(workspace_root, input_root)
     print(f"Workspace ready: {resolved}")
-    for folder, filename in REQUIRED_PATHS:
+    for folder, filename in SOLAFUNE_REQUIRED_FILES:
         print(f"{folder}: {(resolved / folder / filename).exists()}")
     return 0
 

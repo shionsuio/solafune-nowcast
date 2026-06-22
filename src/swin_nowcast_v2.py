@@ -34,6 +34,8 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
+from project_paths import WorkspacePaths
+
 
 SATELLITES = ("himawari", "goes", "meteosat")
 SATELLITE_TO_ID = {name: idx for idx, name in enumerate(SATELLITES)}
@@ -79,24 +81,12 @@ class Config:
     convnext_model_subdir: str = "convnext_v2"
 
     @property
-    def root_path(self) -> Path:
-        return Path(self.root)
-
-    @property
-    def train_dir(self) -> Path:
-        return self.root_path / "train_dataset"
-
-    @property
-    def evaluation_dir(self) -> Path:
-        return self.root_path / "evaluation_dataset"
-
-    @property
-    def sample_submission_dir(self) -> Path:
-        return self.root_path / "sample_submission"
+    def paths(self) -> WorkspacePaths:
+        return WorkspacePaths(self.root)
 
     @property
     def model_dir(self) -> Path:
-        return self.root_path / "models" / "swin_v2"
+        return self.paths.models_dir / "swin_v2"
 
 
 def seed_everything(seed: int) -> None:
@@ -139,7 +129,7 @@ def time_features(timestamp: pd.Timestamp) -> np.ndarray:
 
 
 def satellite_directories(config: Config, split: str) -> dict[str, Path]:
-    base = config.train_dir if split == "train" else config.evaluation_dir
+    base = config.paths.train_dir if split == "train" else config.paths.evaluation_dir
     return {satellite: base / satellite for satellite in SATELLITES}
 
 
@@ -262,7 +252,7 @@ class NowcastingDataset(Dataset):
         self.config = config
         self.has_target = has_target
         self.augment = augment
-        self.gpm_dir = config.train_dir / "gpm_imerg"
+        self.gpm_dir = config.paths.gpm_dir
         self.band_mapping = get_band_mapping(config)
 
     def __len__(self) -> int:
@@ -843,12 +833,12 @@ def create_submission(
     test_files_dir.mkdir(parents=True)
 
     # Preserve all supplied columns and row order exactly.
-    source_csv = config.evaluation_dir / "evaluation_target.csv"
+    source_csv = config.paths.evaluation_dir / "evaluation_target.csv"
     shutil.copy2(source_csv, submission_dir / "evaluation_target.csv")
 
     reference_dirs = [
-        config.sample_submission_dir / "test_files",
-        config.evaluation_dir / "test_files",
+        config.paths.sample_submission_dir / "test_files",
+        config.paths.evaluation_dir / "test_files",
     ]
     for prediction, row in tqdm(
         zip(predictions, evaluation_frame.itertuples(index=False)),
@@ -900,6 +890,6 @@ def validate_submission(
             )
         with archive.open("evaluation_target.csv") as stream:
             submitted_csv = pd.read_csv(stream)
-    source_csv = pd.read_csv(config.evaluation_dir / "evaluation_target.csv")
+    source_csv = pd.read_csv(config.paths.evaluation_dir / "evaluation_target.csv")
     if not submitted_csv.equals(source_csv):
         raise ValueError("Submitted evaluation_target.csv differs from supplied CSV")

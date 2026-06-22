@@ -152,7 +152,7 @@ class UNetNowcaster(nn.Module):
 
 
 def unet_model_dir(config: Config) -> Path:
-    return config.root_path / "models" / config.unet_model_subdir
+    return config.paths.models_dir / config.unet_model_subdir
 
 
 def train_unet_fold(

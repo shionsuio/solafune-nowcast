@@ -99,7 +99,7 @@ def main() -> None:
         use_amp=False,
         seed=args.seed,
     )
-    dataframe = prepare_metadata(base_config.train_dir / "train_dataset.csv")
+    dataframe = prepare_metadata(base_config.paths.train_dir / "train_dataset.csv")
     fold = make_folds(dataframe, base_config.n_folds)[args.fold]
     fold_train = dataframe.iloc[fold["train_indices"]]
     train_frame = balanced_sample(fold_train, args.train_rows, args.seed)
