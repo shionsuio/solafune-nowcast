@@ -1,14 +1,10 @@
-"""Small local U-Net smoke test using a location-disjoint fold."""
+"""CLI wrapper for the U-Net probe experiment."""
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
-from experiment_pipelines import build_sampled_location_fold
-from experiment_utils import load_train_dataframe
-from swin_nowcast_v2 import Config, get_device
-from unet_nowcast_v2 import UNetNowcaster, train_unet_fold
+from experiments.probes import run_unet_probe
 
 
 def main() -> None:
@@ -22,39 +18,7 @@ def main() -> None:
     parser.add_argument("--encoder-size", type=int, default=96)
     parser.add_argument("--base-channels", type=int, default=32)
     args = parser.parse_args()
-
-    root = Path(args.root).resolve()
-    config = Config(
-        root=str(root),
-        encoder_size=args.encoder_size,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        workers=0,
-        pretrained=False,
-        use_amp=False,
-        stats_samples_per_satellite=300,
-        unet_model_subdir="unet_probe",
-    )
-    dataframe = load_train_dataframe(config)
-    sampled, fold = build_sampled_location_fold(
-        config,
-        dataframe,
-        args.fold,
-        args.train_rows,
-        args.validation_rows,
-        config.seed,
-    )
-
-    model = UNetNowcaster(config, base_channels=args.base_channels)
-    print("parameters", sum(parameter.numel() for parameter in model.parameters()))
-    result = train_unet_fold(
-        config,
-        sampled,
-        fold,
-        device=get_device(),
-        base_channels=args.base_channels,
-    )
-    print(result)
+    run_unet_probe(args)
 
 
 if __name__ == "__main__":

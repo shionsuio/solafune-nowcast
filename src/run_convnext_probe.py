@@ -1,14 +1,10 @@
-"""Small local ConvNeXt smoke test using a location-disjoint fold."""
+"""CLI wrapper for the ConvNeXt probe experiment."""
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
-from convnext_nowcast_v2 import ConvNeXtNowcaster, train_convnext_fold
-from experiment_pipelines import build_sampled_location_fold
-from experiment_utils import load_train_dataframe
-from swin_nowcast_v2 import Config, get_device
+from experiments.probes import run_convnext_probe
 
 
 def main() -> None:
@@ -21,31 +17,7 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--encoder-size", type=int, default=96)
     args = parser.parse_args()
-
-    root = Path(args.root).resolve()
-    config = Config(
-        root=str(root),
-        encoder_size=args.encoder_size,
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        workers=0,
-        pretrained=False,
-        use_amp=False,
-        stats_samples_per_satellite=200,
-        convnext_model_subdir="convnext_probe",
-    )
-    dataframe = load_train_dataframe(config)
-    sampled, fold = build_sampled_location_fold(
-        config,
-        dataframe,
-        args.fold,
-        args.train_rows,
-        args.validation_rows,
-        config.seed,
-    )
-    model = ConvNeXtNowcaster(config)
-    print("parameters", sum(parameter.numel() for parameter in model.parameters()))
-    print(train_convnext_fold(config, sampled, fold, device=get_device()))
+    run_convnext_probe(args)
 
 
 if __name__ == "__main__":
