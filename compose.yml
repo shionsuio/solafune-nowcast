@@ -1,0 +1,22 @@
+services:
+  lab:
+    build:
+      context: .
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    ports:
+      - "127.0.0.1:8888:8888"
+    shm_size: "2gb"
+    init: true
+    environment:
+      MPLCONFIGDIR: /workspace/.cache/matplotlib
+      XDG_CACHE_HOME: /workspace/.cache
+    command:
+      - jupyter
+      - lab
+      - --ip=0.0.0.0
+      - --port=8888
+      - --no-browser
+      - --allow-root
+      - --IdentityProvider.token=

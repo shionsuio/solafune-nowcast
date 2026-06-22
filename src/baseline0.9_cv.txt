@@ -1,0 +1,16 @@
+Epoch 01/20 | Train RMSE: 1.3077 | Val RMSE: 1.6388 | LR: 1.00e-03 | 490.2s ★ saved
+Epoch 02/20 | Train RMSE: 1.3029 | Val RMSE: 1.6085 | LR: 1.00e-03 | 507.6s ★ saved
+Epoch 03/20 | Train RMSE: 1.2990 | Val RMSE: 1.6019 | LR: 1.00e-03 | 517.1s ★ saved
+Epoch 04/20 | Train RMSE: 1.2947 | Val RMSE: 1.5953 | LR: 1.00e-03 | 498.7s ★ saved
+Epoch 05/20 | Train RMSE: 1.2902 | Val RMSE: 1.5958 | LR: 1.00e-03 | 483.6s
+Epoch 06/20 | Train RMSE: 1.2831 | Val RMSE: 1.5835 | LR: 1.00e-03 | 527.4s ★ saved
+Epoch 07/20 | Train RMSE: 1.2773 | Val RMSE: 1.5785 | LR: 1.00e-03 | 507.6s ★ saved
+Epoch 08/20 | Train RMSE: 1.2745 | Val RMSE: 1.5961 | LR: 1.00e-03 | 467.3s
+Epoch 09/20 | Train RMSE: 1.2722 | Val RMSE: 1.5626 | LR: 1.00e-03 | 476.1s ★ saved
+Epoch 10/20 | Train RMSE: 1.2698 | Val RMSE: 1.5727 | LR: 1.00e-03 | 586.6s
+Epoch 11/20 | Train RMSE: 1.2669 | Val RMSE: 1.5649 | LR: 1.00e-03 | 523.2s
+Epoch 12/20 | Train RMSE: 1.2665 | Val RMSE: 1.5817 | LR: 1.00e-03 | 484.8s
+Epoch 13/20 | Train RMSE: 1.2639 | Val RMSE: 1.5908 | LR: 5.00e-04 | 488.3s
+Epoch 14/20 | Train RMSE: 1.2564 | Val RMSE: 1.5435 | LR: 5.00e-04 | 526.7s ★ saved
+Epoch 15/20 | Train RMSE: 1.2543 | Val RMSE: 1.5511 | LR: 5.00e-04 | 564.8s
+Epoch 16/20 | Train RMSE: 1.2531 | Val RMSE: 1.5618 | LR: 5.00e-04 | 498.2s

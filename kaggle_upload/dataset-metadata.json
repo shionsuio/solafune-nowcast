@@ -1,0 +1,12 @@
+{
+  "title": "Solafune Nowcasting Private 20260622",
+  "id": "suioshion/solafune-nowcasting-private-20260622",
+  "licenses": [
+    {
+      "name": "other"
+    }
+  ],
+  "subtitle": "Private competition data for precipitation nowcasting experiments",
+  "description": "Private working copy of the Solafune competition-provided train, evaluation, and sample submission data. Redistribution and publication are prohibited by the competition rules.",
+  "keywords": []
+}

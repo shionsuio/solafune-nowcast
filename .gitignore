@@ -1,0 +1,13 @@
+.DS_Store
+.cache/
+.ipynb_checkpoints/
+.venv/
+models/
+submission/
+outputs/
+__pycache__/
+train_dataset/
+evaluation_dataset/
+sample_submission/
+solafune_data.zip
+download
