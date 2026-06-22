@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -14,6 +13,7 @@ import torch
 import torch.nn as nn
 from tqdm.auto import tqdm
 
+from experiment_pipelines import evaluate_rmse
 from experiment_utils import balanced_sample, build_folds, load_train_dataframe
 from swin_nowcast_v2 import (
     Config,
@@ -24,7 +24,6 @@ from swin_nowcast_v2 import (
     get_device,
     load_stats,
     make_loader,
-    original_scale_rmse,
     satellite_directories,
     save_stats,
     seed_everything,
@@ -51,24 +50,6 @@ EXPERIMENTS = {
         "use_satellite_embedding": True,
     },
 }
-
-
-def evaluate(model, loader, device) -> float:
-    model.eval()
-    squared_error = 0.0
-    pixel_count = 0
-    with torch.no_grad():
-        for image, satellite_id, temporal, missing, target, _ in loader:
-            prediction = model(
-                image.to(device),
-                satellite_id.to(device),
-                temporal.to(device),
-                missing.to(device),
-            ).cpu()
-            batch_error, batch_pixels = original_scale_rmse(prediction, target)
-            squared_error += batch_error
-            pixel_count += batch_pixels
-    return math.sqrt(squared_error / pixel_count)
 
 
 def main() -> None:
@@ -181,7 +162,7 @@ def main() -> None:
                 running_loss += loss.item() * image.shape[0]
                 seen += image.shape[0]
 
-            validation_rmse = evaluate(model, validation_loader, device)
+            validation_rmse = evaluate_rmse(model, validation_loader, device)
             best_rmse = min(best_rmse, validation_rmse)
             print(
                 f"{name}: epoch={epoch} train_huber={running_loss/seen:.5f} "

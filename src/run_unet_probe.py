@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-
-from experiment_utils import balanced_sample, build_folds, load_train_dataframe
+from experiment_pipelines import build_sampled_location_fold
+from experiment_utils import load_train_dataframe
 from swin_nowcast_v2 import Config, get_device
 from unet_nowcast_v2 import UNetNowcaster, train_unet_fold
 
@@ -38,22 +36,14 @@ def main() -> None:
         unet_model_subdir="unet_probe",
     )
     dataframe = load_train_dataframe(config)
-    original_fold = build_folds(config, dataframe)[args.fold]
-    train_frame = balanced_sample(
-        dataframe.iloc[original_fold["train_indices"]], args.train_rows, config.seed
-    )
-    validation_frame = balanced_sample(
-        dataframe.iloc[original_fold["validation_indices"]],
+    sampled, fold = build_sampled_location_fold(
+        config,
+        dataframe,
+        args.fold,
+        args.train_rows,
         args.validation_rows,
-        config.seed + 1,
+        config.seed,
     )
-    sampled = pd.concat([train_frame, validation_frame], ignore_index=True)
-    fold = {
-        "fold": args.fold,
-        "train_indices": np.arange(len(train_frame)),
-        "validation_indices": np.arange(len(train_frame), len(sampled)),
-        "validation_locations": original_fold["validation_locations"],
-    }
 
     model = UNetNowcaster(config, base_channels=args.base_channels)
     print("parameters", sum(parameter.numel() for parameter in model.parameters()))

@@ -5,11 +5,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
-
 from convnext_nowcast_v2 import ConvNeXtNowcaster, train_convnext_fold
-from experiment_utils import balanced_sample, build_folds, load_train_dataframe
+from experiment_pipelines import build_sampled_location_fold
+from experiment_utils import load_train_dataframe
 from swin_nowcast_v2 import Config, get_device
 
 
@@ -37,24 +35,14 @@ def main() -> None:
         convnext_model_subdir="convnext_probe",
     )
     dataframe = load_train_dataframe(config)
-    original_fold = build_folds(config, dataframe)[args.fold]
-    train_frame = balanced_sample(
-        dataframe.iloc[original_fold["train_indices"]],
+    sampled, fold = build_sampled_location_fold(
+        config,
+        dataframe,
+        args.fold,
         args.train_rows,
+        args.validation_rows,
         config.seed,
     )
-    validation_frame = balanced_sample(
-        dataframe.iloc[original_fold["validation_indices"]],
-        args.validation_rows,
-        config.seed + 1,
-    )
-    sampled = pd.concat([train_frame, validation_frame], ignore_index=True)
-    fold = {
-        "fold": args.fold,
-        "train_indices": np.arange(len(train_frame)),
-        "validation_indices": np.arange(len(train_frame), len(sampled)),
-        "validation_locations": original_fold["validation_locations"],
-    }
     model = ConvNeXtNowcaster(config)
     print("parameters", sum(parameter.numel() for parameter in model.parameters()))
     print(train_convnext_fold(config, sampled, fold, device=get_device()))
