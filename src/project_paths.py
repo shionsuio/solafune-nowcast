@@ -58,10 +58,15 @@ def find_solafune_input_root(search_root: Path = Path("/kaggle/input")) -> Path:
     if not search_root.exists():
         raise FileNotFoundError(f"Input mount not found: {search_root}")
 
-    for candidate in sorted(search_root.iterdir()):
-        if not candidate.is_dir():
+    candidate_csvs = sorted(search_root.rglob("train_dataset.csv"))
+    for csv_path in candidate_csvs:
+        candidate = csv_path.parent.parent
+        if candidate == search_root.parent:
             continue
-        if all((candidate / folder / filename).exists() for folder, filename in SOLAFUNE_REQUIRED_FILES):
+        if all(
+            (candidate / folder / filename).exists()
+            for folder, filename in SOLAFUNE_REQUIRED_FILES
+        ):
             if all((candidate / folder).is_dir() for folder in SOLAFUNE_DATA_FOLDERS):
                 if (candidate / "sample_submission" / "test_files").is_dir():
                     return candidate
