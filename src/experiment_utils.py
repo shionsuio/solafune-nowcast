@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import pandas as pd
 
+from kaggle_setup import ensure_kaggle_workspace
 from swin_nowcast_v2 import Config, make_folds, prepare_metadata
 
 
 def load_train_dataframe(config: Config) -> pd.DataFrame:
-    return prepare_metadata(config.paths.train_dir / "train_dataset.csv")
+    train_csv = config.paths.train_dir / "train_dataset.csv"
+    if not train_csv.exists():
+        ensure_kaggle_workspace(config.paths.root)
+    return prepare_metadata(train_csv)
 
 
 def build_folds(config: Config, dataframe: pd.DataFrame) -> list[dict]:
