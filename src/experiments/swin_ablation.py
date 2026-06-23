@@ -90,6 +90,13 @@ EXPERIMENTS = {
 def run(args) -> Path:
     root = Path(args.root).resolve()
     device = get_device()
+    read_stats_dir = (
+        Path(args.band_stats_root).resolve() if args.band_stats_root else None
+    )
+    write_stats_dir = root / "outputs" / "band_stats"
+    experiment_output_dir = root / "outputs" / "swin_ablation"
+    write_stats_dir.mkdir(parents=True, exist_ok=True)
+    experiment_output_dir.mkdir(parents=True, exist_ok=True)
     base_config = Config(
         root=str(root),
         batch_size=args.batch_size,
@@ -98,7 +105,7 @@ def run(args) -> Path:
         pretrained=False,
         use_amp=False,
         seed=args.seed,
-        band_stats_root=args.band_stats_root,
+        band_stats_root=str(write_stats_dir),
     )
     dataframe = load_train_dataframe(base_config)
     fold = build_folds(base_config, dataframe)[args.fold]
@@ -114,10 +121,20 @@ def run(args) -> Path:
     directories = satellite_directories(base_config, "train")
     stats_by_band_mode = {}
     for band_mode in ("matched6", "legacy3"):
-        stats_path = base_config.band_stats_dir / f"swin_ablation_{band_mode}_fold{args.fold}.json"
+        stats_filename = f"swin_ablation_{band_mode}_fold{args.fold}.json"
+        write_stats_path = write_stats_dir / stats_filename
+        read_stats_path = (
+            read_stats_dir / stats_filename if read_stats_dir is not None else None
+        )
         config = replace(base_config, band_mode=band_mode)
-        if stats_path.exists():
-            stats = load_stats(stats_path)
+        if write_stats_path.exists():
+            stats = load_stats(write_stats_path)
+        elif read_stats_path is not None and read_stats_path.exists():
+            stats = load_stats(read_stats_path)
+            if "shared" not in stats:
+                raise ValueError(
+                    f"Cached stats do not contain shared normalization: {read_stats_path}"
+                )
         else:
             stats = compute_band_stats(
                 dataframe.iloc[fold["train_indices"]],
@@ -127,7 +144,7 @@ def run(args) -> Path:
                 band_mapping=get_band_mapping(config),
                 include_shared=True,
             )
-            save_stats(stats, stats_path)
+            save_stats(stats, write_stats_path)
         stats_by_band_mode[band_mode] = stats
 
     results = []
@@ -205,7 +222,7 @@ def run(args) -> Path:
         )
         history_frame = pd.DataFrame(history)
         history_frame.to_csv(
-            root / "outputs" / "swin_ablation" / f"{name}_fold{args.fold}.csv",
+            experiment_output_dir / f"{name}_fold{args.fold}.csv",
             index=False,
         )
         del model
