@@ -15,6 +15,7 @@ from pathlib import Path
 from project_paths import (
     SOLAFUNE_DATA_FOLDERS,
     SOLAFUNE_REQUIRED_FILES,
+    SOLAFUNE_OPTIONAL_FOLDERS,
     find_solafune_input_root,
 )
 
@@ -46,6 +47,22 @@ def ensure_kaggle_workspace(
                 destination.unlink()
         destination.symlink_to(source, target_is_directory=True)
 
+    for folder in SOLAFUNE_OPTIONAL_FOLDERS:
+        source = input_root / folder
+        destination = workspace_root / folder
+        if not source.exists():
+            continue
+        if destination.exists() or destination.is_symlink():
+            if destination.is_symlink() and destination.resolve() == source.resolve():
+                continue
+            if destination.is_dir() and destination.resolve() == source.resolve():
+                continue
+            if destination.is_dir():
+                shutil.rmtree(destination)
+            else:
+                destination.unlink()
+        destination.symlink_to(source, target_is_directory=True)
+
     return workspace_root
 
 
@@ -61,7 +78,9 @@ def main() -> int:
     print(f"Workspace ready: {resolved}")
     for folder, filename in SOLAFUNE_REQUIRED_FILES:
         print(f"{folder}: {(resolved / folder / filename).exists()}")
-    print(f"sample_submission fallback: {(resolved / 'evaluation_dataset' / 'test_files').exists()}")
+    sample_submission_dir = resolved / "sample_submission"
+    print(f"sample_submission root: {sample_submission_dir.exists()}")
+    print(f"sample_submission nested: {(sample_submission_dir / 'sample_submission').exists()}")
     return 0
 
 

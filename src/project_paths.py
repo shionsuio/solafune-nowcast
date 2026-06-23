@@ -15,6 +15,10 @@ SOLAFUNE_DATA_FOLDERS = (
     "evaluation_dataset",
 )
 
+SOLAFUNE_OPTIONAL_FOLDERS = (
+    "sample_submission",
+)
+
 SOLAFUNE_REQUIRED_FILES = (
     ("train_dataset", "train_dataset.csv"),
     ("evaluation_dataset", "evaluation_target.csv"),
@@ -40,6 +44,9 @@ class WorkspacePaths:
 
     @property
     def sample_submission_dir(self) -> Path:
+        nested = self.root / "sample_submission" / "sample_submission"
+        if nested.exists():
+            return nested
         return self.root / "sample_submission"
 
     @property
