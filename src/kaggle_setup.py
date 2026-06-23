@@ -61,6 +61,7 @@ def main() -> int:
     print(f"Workspace ready: {resolved}")
     for folder, filename in SOLAFUNE_REQUIRED_FILES:
         print(f"{folder}: {(resolved / folder / filename).exists()}")
+    print(f"sample_submission fallback: {(resolved / 'evaluation_dataset' / 'test_files').exists()}")
     return 0
 
 

@@ -13,13 +13,11 @@ from pathlib import Path
 SOLAFUNE_DATA_FOLDERS = (
     "train_dataset",
     "evaluation_dataset",
-    "sample_submission",
 )
 
 SOLAFUNE_REQUIRED_FILES = (
     ("train_dataset", "train_dataset.csv"),
     ("evaluation_dataset", "evaluation_target.csv"),
-    ("sample_submission", "evaluation_target.csv"),
 )
 
 
@@ -68,8 +66,7 @@ def find_solafune_input_root(search_root: Path = Path("/kaggle/input")) -> Path:
             for folder, filename in SOLAFUNE_REQUIRED_FILES
         ):
             if all((candidate / folder).is_dir() for folder in SOLAFUNE_DATA_FOLDERS):
-                if (candidate / "sample_submission" / "test_files").is_dir():
-                    return candidate
+                return candidate
 
     raise FileNotFoundError(
         f"Could not find a Kaggle dataset under {search_root} with the expected Solafune layout"
