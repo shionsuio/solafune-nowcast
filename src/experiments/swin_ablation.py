@@ -30,59 +30,69 @@ from swin_nowcast_v2 import (
 
 
 EXPERIMENTS = {
-    "matched6_full": {
-        "band_mode": "matched6",
-        "use_satellite_normalization": True,
-        "use_satellite_stem": True,
-        "use_satellite_embedding": True,
+    "baseline": {
         "use_month_features": True,
         "use_hour_features": True,
         "use_missing_flag": True,
+        "use_satellite_embedding": True,
+        "use_temporal_differences": False,
+        "use_temporal_summary": False,
     },
-    "matched6_shared": {
-        "band_mode": "matched6",
-        "use_satellite_normalization": False,
-        "use_satellite_stem": False,
-        "use_satellite_embedding": False,
+    "plus_temporal_differences": {
         "use_month_features": True,
         "use_hour_features": True,
         "use_missing_flag": True,
-    },
-    "legacy3_full": {
-        "band_mode": "legacy3",
-        "use_satellite_normalization": True,
-        "use_satellite_stem": True,
         "use_satellite_embedding": True,
+        "use_temporal_differences": True,
+        "use_temporal_summary": False,
+    },
+    "plus_temporal_summary": {
         "use_month_features": True,
         "use_hour_features": True,
         "use_missing_flag": True,
-    },
-    "matched6_no_hour": {
-        "band_mode": "matched6",
-        "use_satellite_normalization": True,
-        "use_satellite_stem": True,
         "use_satellite_embedding": True,
+        "use_temporal_differences": False,
+        "use_temporal_summary": True,
+    },
+    "plus_all_temporal": {
         "use_month_features": True,
-        "use_hour_features": False,
+        "use_hour_features": True,
         "use_missing_flag": True,
-    },
-    "matched6_no_month": {
-        "band_mode": "matched6",
-        "use_satellite_normalization": True,
-        "use_satellite_stem": True,
         "use_satellite_embedding": True,
+        "use_temporal_differences": True,
+        "use_temporal_summary": True,
+    },
+    "no_month": {
         "use_month_features": False,
         "use_hour_features": True,
         "use_missing_flag": True,
-    },
-    "matched6_no_missing": {
-        "band_mode": "matched6",
-        "use_satellite_normalization": True,
-        "use_satellite_stem": True,
         "use_satellite_embedding": True,
+        "use_temporal_differences": False,
+        "use_temporal_summary": False,
+    },
+    "no_hour": {
+        "use_month_features": True,
+        "use_hour_features": False,
+        "use_missing_flag": True,
+        "use_satellite_embedding": True,
+        "use_temporal_differences": False,
+        "use_temporal_summary": False,
+    },
+    "no_satellite_id": {
+        "use_month_features": True,
+        "use_hour_features": True,
+        "use_missing_flag": True,
+        "use_satellite_embedding": False,
+        "use_temporal_differences": False,
+        "use_temporal_summary": False,
+    },
+    "no_missing_flag": {
         "use_month_features": True,
         "use_hour_features": True,
         "use_missing_flag": False,
+        "use_satellite_embedding": True,
+        "use_temporal_differences": False,
+        "use_temporal_summary": False,
     },
 }
 
@@ -102,8 +112,8 @@ def run(args) -> Path:
         batch_size=args.batch_size,
         epochs=args.epochs,
         workers=0,
-        pretrained=False,
-        use_amp=False,
+        pretrained=True,
+        use_amp=True,
         seed=args.seed,
         band_stats_root=str(write_stats_dir),
     )
@@ -119,39 +129,29 @@ def run(args) -> Path:
     )
 
     directories = satellite_directories(base_config, "train")
-    stats_by_band_mode = {}
-    for band_mode in ("matched6", "legacy3"):
-        stats_filename = f"swin_ablation_{band_mode}_fold{args.fold}.json"
-        write_stats_path = write_stats_dir / stats_filename
-        read_stats_path = (
-            read_stats_dir / stats_filename if read_stats_dir is not None else None
+    stats_filename = f"swin_ablation_matched6_fold{args.fold}.json"
+    write_stats_path = write_stats_dir / stats_filename
+    read_stats_path = (
+        read_stats_dir / stats_filename if read_stats_dir is not None else None
+    )
+    if write_stats_path.exists():
+        stats = load_stats(write_stats_path)
+    elif read_stats_path is not None and read_stats_path.exists():
+        stats = load_stats(read_stats_path)
+    else:
+        stats = compute_band_stats(
+            dataframe.iloc[fold["train_indices"]],
+            directories,
+            max_samples_per_satellite=args.stats_rows_per_satellite,
+            seed=args.seed,
+            band_mapping=get_band_mapping(base_config),
         )
-        config = replace(base_config, band_mode=band_mode)
-        if write_stats_path.exists():
-            stats = load_stats(write_stats_path)
-        elif read_stats_path is not None and read_stats_path.exists():
-            stats = load_stats(read_stats_path)
-            if "shared" not in stats:
-                raise ValueError(
-                    f"Cached stats do not contain shared normalization: {read_stats_path}"
-                )
-        else:
-            stats = compute_band_stats(
-                dataframe.iloc[fold["train_indices"]],
-                directories,
-                max_samples_per_satellite=args.stats_rows_per_satellite,
-                seed=args.seed,
-                band_mapping=get_band_mapping(config),
-                include_shared=True,
-            )
-            save_stats(stats, write_stats_path)
-        stats_by_band_mode[band_mode] = stats
+        save_stats(stats, write_stats_path)
 
     results = []
     for name, flags in EXPERIMENTS.items():
         config = replace(base_config, **flags)
         seed_everything(args.seed)
-        stats = stats_by_band_mode[config.band_mode]
         train_dataset = NowcastingDataset(
             train_frame, directories, stats, config, has_target=True, augment=True
         )
@@ -174,6 +174,8 @@ def run(args) -> Path:
         trainable = [parameter for parameter in model.parameters() if parameter.requires_grad]
         optimizer = torch.optim.AdamW(trainable, lr=2e-4, weight_decay=1e-4)
         criterion = nn.HuberLoss(delta=1.0)
+        amp_enabled = device.type == "cuda"
+        scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
         best_rmse = float("inf")
         history = []
         started = time.time()
@@ -186,15 +188,21 @@ def run(args) -> Path:
                 train_loader, desc=f"{name} epoch {epoch}", leave=False
             ):
                 optimizer.zero_grad(set_to_none=True)
-                prediction = model(
-                    image.to(device),
-                    satellite_id.to(device),
-                    temporal.to(device),
-                    missing.to(device),
-                )
-                loss = criterion(prediction, target.to(device))
-                loss.backward()
-                optimizer.step()
+                with torch.autocast(
+                    device_type=device.type,
+                    dtype=torch.float16,
+                    enabled=amp_enabled,
+                ):
+                    prediction = model(
+                        image.to(device),
+                        satellite_id.to(device),
+                        temporal.to(device),
+                        missing.to(device),
+                    )
+                    loss = criterion(prediction, target.to(device))
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 running_loss += loss.item() * image.shape[0]
                 seen += image.shape[0]
 
@@ -226,7 +234,9 @@ def run(args) -> Path:
             index=False,
         )
         del model
-        if device.type == "mps":
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        elif device.type == "mps":
             torch.mps.empty_cache()
 
     output_path = root / args.output

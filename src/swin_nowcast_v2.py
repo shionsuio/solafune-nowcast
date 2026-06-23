@@ -75,6 +75,8 @@ class Config:
     use_month_features: bool = True
     use_hour_features: bool = True
     use_missing_flag: bool = True
+    use_temporal_differences: bool = False
+    use_temporal_summary: bool = False
     band_mode: str = "matched6"
     use_satellite_normalization: bool = True
     unet_model_subdir: str = "unet_v2"
@@ -320,7 +322,19 @@ class NowcastingDataset(Dataset):
                         dtype=np.float32,
                     )
                 )
-        image = np.concatenate(observations, axis=0)
+        observation_stack = np.stack(observations, axis=0)
+        image_features = [observation_stack.reshape(-1, *observation_stack.shape[-2:])]
+        if self.config.use_temporal_differences:
+            differences = np.diff(observation_stack, axis=0)
+            image_features.append(differences.reshape(-1, *differences.shape[-2:]))
+        if self.config.use_temporal_summary:
+            image_features.extend(
+                [
+                    observation_stack.mean(axis=0),
+                    observation_stack.std(axis=0),
+                ]
+            )
+        image = np.concatenate(image_features, axis=0)
 
         if self.has_target:
             target = self._read_target(self.gpm_dir / row["gpm_imerg_filename"])
@@ -433,7 +447,12 @@ class SwinNowcaster(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
         band_mapping = get_band_mapping(config)
-        raw_channels = len(next(iter(band_mapping.values()))) * config.max_observations
+        band_count = len(next(iter(band_mapping.values())))
+        raw_channels = band_count * config.max_observations
+        if config.use_temporal_differences:
+            raw_channels += band_count * (config.max_observations - 1)
+        if config.use_temporal_summary:
+            raw_channels += band_count * 2
         self.config = config
         self.stem = SatelliteStem(raw_channels, config.stem_channels)
         self.shared_stem = nn.Sequential(
