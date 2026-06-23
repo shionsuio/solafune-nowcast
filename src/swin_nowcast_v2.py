@@ -79,6 +79,7 @@ class Config:
     use_temporal_summary: bool = False
     band_mode: str = "matched6"
     use_satellite_normalization: bool = True
+    swin_model_subdir: str = "swin_v2"
     unet_model_subdir: str = "unet_v2"
     convnext_model_subdir: str = "convnext_v2"
     band_stats_root: str | None = None
@@ -89,7 +90,7 @@ class Config:
 
     @property
     def model_dir(self) -> Path:
-        return self.paths.models_dir / "swin_v2"
+        return self.paths.models_dir / self.swin_model_subdir
 
     @property
     def band_stats_dir(self) -> Path:
