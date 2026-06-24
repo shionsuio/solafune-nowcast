@@ -47,6 +47,8 @@ def run(args: argparse.Namespace) -> Path:
         root=str(root),
         batch_size=args.batch_size,
         epochs=args.epochs,
+        lr_encoder=args.lr_encoder,
+        lr_head=args.lr_head,
         workers=args.workers,
         stats_samples_per_satellite=args.stats_samples_per_satellite,
         seed=args.seed,
@@ -96,6 +98,8 @@ def main() -> None:
     parser.add_argument("--folds", default="0")
     parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--lr-encoder", type=float, default=2e-5)
+    parser.add_argument("--lr-head", type=float, default=1e-4)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--stats-samples-per-satellite", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=42)

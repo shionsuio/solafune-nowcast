@@ -692,6 +692,10 @@ def train_fold(
             ):
                 prediction = model(image, satellite_id, temporal, missing)
                 loss = criterion(prediction, target)
+            if not torch.isfinite(loss):
+                raise FloatingPointError(
+                    f"Non-finite training loss at fold={fold['fold']} epoch={epoch}"
+                )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -718,6 +722,10 @@ def train_fold(
 
         scheduler.step()
         validation_rmse = math.sqrt(squared_error / pixel_count)
+        if not math.isfinite(validation_rmse):
+            raise FloatingPointError(
+                f"Non-finite validation RMSE at fold={fold['fold']} epoch={epoch}"
+            )
         train_huber = loss_sum / sample_count
         row = {
             "epoch": epoch,
