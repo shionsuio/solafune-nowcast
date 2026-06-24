@@ -31,10 +31,20 @@ def ensure_kaggle_workspace(
     """Create symlinks for the dataset folders inside a writable workspace."""
     workspace_root = workspace_root.resolve()
     workspace_root.mkdir(parents=True, exist_ok=True)
-    input_root = input_root or detect_kaggle_input_root()
+    if input_root is None:
+        input_root = detect_kaggle_input_root()
+    else:
+        input_root = Path(input_root)
+        if not all(
+            (input_root / folder / filename).exists()
+            for folder, filename in SOLAFUNE_REQUIRED_FILES
+        ):
+            input_root = find_solafune_input_root(input_root)
 
     for folder in SOLAFUNE_DATA_FOLDERS:
         source = input_root / folder
+        if not source.exists():
+            raise FileNotFoundError(f"Required Kaggle input folder is missing: {source}")
         destination = workspace_root / folder
         if destination.exists() or destination.is_symlink():
             if destination.is_symlink() and destination.resolve() == source.resolve():
