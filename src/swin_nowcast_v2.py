@@ -65,6 +65,7 @@ class Config:
     lr_head: float = 2e-4
     weight_decay: float = 1e-4
     huber_delta: float = 1.0
+    loss_type: str = "huber"
     workers: int = 2
     stats_samples_per_satellite: int | None = 1500
     seed: int = 42
@@ -664,7 +665,12 @@ def train_fold(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=config.epochs
     )
-    criterion = nn.HuberLoss(delta=config.huber_delta)
+    if config.loss_type == "huber":
+        criterion = nn.HuberLoss(delta=config.huber_delta)
+    elif config.loss_type == "log_mse":
+        criterion = nn.MSELoss()
+    else:
+        raise ValueError(f"Unknown loss_type: {config.loss_type}")
     amp_enabled = config.use_amp and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
