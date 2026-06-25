@@ -60,6 +60,8 @@ def run(args: argparse.Namespace) -> Path:
         use_amp=not args.no_amp,
         use_temporal_differences=True,
         use_temporal_summary=True,
+        use_location_features=args.use_location_features,
+        location_metadata_path=args.location_metadata_path,
         swin_model_subdir=args.model_subdir,
         band_stats_root=str(write_stats_dir),
     )
@@ -115,6 +117,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--model-subdir", default="swin_v2_temporal")
     parser.add_argument("--band-stats-root", default=None)
+    parser.add_argument("--use-location-features", action="store_true")
+    parser.add_argument("--location-metadata-path", default=None)
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-amp", action="store_true")
     args = parser.parse_args()

@@ -81,6 +81,8 @@ class Config:
     use_missing_flag: bool = True
     use_temporal_differences: bool = False
     use_temporal_summary: bool = False
+    use_location_features: bool = False
+    location_metadata_path: str | None = None
     band_mode: str = "matched6"
     use_satellite_normalization: bool = True
     swin_model_subdir: str = "swin_v2"
@@ -138,6 +140,111 @@ def time_features(timestamp: pd.Timestamp) -> np.ndarray:
             math.cos(hour_phase),
         ],
         dtype=np.float32,
+    )
+
+
+def load_location_metadata(path: str | Path) -> pd.DataFrame:
+    """Load manually curated location coordinates.
+
+    Required columns:
+    - name_location
+    - latitude
+    - longitude
+
+    Coordinates are intentionally supplied by a local CSV so the training code
+    does not perform geocoding or fetch any external dataset.
+    """
+    metadata = pd.read_csv(path)
+    required = {"name_location", "latitude", "longitude"}
+    missing = required - set(metadata.columns)
+    if missing:
+        raise ValueError(f"Location metadata is missing columns: {sorted(missing)}")
+    metadata = metadata[["name_location", "latitude", "longitude"]].copy()
+    metadata["name_location"] = metadata["name_location"].astype(str)
+    metadata["latitude"] = pd.to_numeric(metadata["latitude"], errors="coerce")
+    metadata["longitude"] = pd.to_numeric(metadata["longitude"], errors="coerce")
+    if metadata[["latitude", "longitude"]].isna().any().any():
+        bad = metadata[
+            metadata[["latitude", "longitude"]].isna().any(axis=1)
+        ]["name_location"].tolist()
+        raise ValueError(f"Invalid coordinates for locations: {bad[:10]}")
+    if metadata["name_location"].duplicated().any():
+        duplicated = metadata.loc[
+            metadata["name_location"].duplicated(), "name_location"
+        ].tolist()
+        raise ValueError(f"Duplicated location rows: {duplicated[:10]}")
+    if not metadata["latitude"].between(-90, 90).all():
+        raise ValueError("Latitude must be in [-90, 90]")
+    if not metadata["longitude"].between(-180, 180).all():
+        raise ValueError("Longitude must be in [-180, 180]")
+    return metadata
+
+
+def attach_location_metadata(
+    dataframe: pd.DataFrame, config: Config, required: bool = True
+) -> pd.DataFrame:
+    """Attach coordinates to a dataframe when location features are enabled."""
+    if not config.use_location_features:
+        return dataframe
+    if not config.location_metadata_path:
+        raise ValueError("location_metadata_path is required when use_location_features=True")
+    metadata = load_location_metadata(config.location_metadata_path)
+    merged = dataframe.merge(metadata, on="name_location", how="left", validate="many_to_one")
+    if required and merged[["latitude", "longitude"]].isna().any().any():
+        missing_locations = sorted(
+            merged.loc[
+                merged[["latitude", "longitude"]].isna().any(axis=1),
+                "name_location",
+            ].unique()
+        )
+        raise ValueError(
+            "Location metadata does not cover all rows. "
+            f"Missing examples: {missing_locations[:20]}"
+        )
+    return merged
+
+
+def location_features(row: pd.Series) -> np.ndarray:
+    """Continuous geospatial/time features derived from manual coordinates."""
+    latitude = float(row["latitude"])
+    longitude = float(row["longitude"])
+    timestamp = row["datetime"]
+
+    month_phase = 2 * math.pi * (timestamp.month - 1) / 12
+    utc_hour = timestamp.hour + timestamp.minute / 60
+    # Approximate solar local time from longitude. This avoids timezone lookup.
+    local_hour = (utc_hour + longitude / 15.0) % 24
+    local_hour_phase = 2 * math.pi * local_hour / 24
+    lon_phase = math.radians(longitude)
+    hemisphere = 1.0 if latitude >= 0 else -1.0
+
+    return np.asarray(
+        [
+            latitude / 90.0,
+            longitude / 180.0,
+            abs(latitude) / 90.0,
+            hemisphere,
+            math.sin(lon_phase),
+            math.cos(lon_phase),
+            math.sin(local_hour_phase),
+            math.cos(local_hour_phase),
+            hemisphere * math.sin(month_phase),
+            hemisphere * math.cos(month_phase),
+        ],
+        dtype=np.float32,
+    )
+
+
+def context_features(row: pd.Series, config: Config) -> np.ndarray:
+    features = [time_features(row["datetime"])]
+    if config.use_location_features:
+        features.append(location_features(row))
+    return np.concatenate(features).astype(np.float32)
+
+
+def context_feature_count(config: Config) -> int:
+    return len(time_features(pd.Timestamp("2000-01-01"))) + (
+        10 if config.use_location_features else 0
     )
 
 
@@ -367,7 +474,7 @@ class NowcastingDataset(Dataset):
         return (
             torch.from_numpy(image),
             torch.tensor(SATELLITE_TO_ID[satellite], dtype=torch.long),
-            torch.from_numpy(time_features(row["datetime"])),
+            torch.from_numpy(context_features(row, self.config)),
             torch.tensor([missing], dtype=torch.float32),
             torch.from_numpy(target),
             metadata,
@@ -485,7 +592,7 @@ class SwinNowcaster(nn.Module):
         condition_size = config.decoder_channels
         self.satellite_embedding = nn.Embedding(len(SATELLITES), condition_size)
         self.context_mlp = nn.Sequential(
-            nn.Linear(5, condition_size),
+            nn.Linear(context_feature_count(config) + 1, condition_size),
             nn.GELU(),
             nn.Linear(condition_size, condition_size),
         )
@@ -512,7 +619,7 @@ class SwinNowcaster(nn.Module):
         if not self.config.use_month_features:
             context[:, :2] = 0
         if not self.config.use_hour_features:
-            context[:, 2:] = 0
+            context[:, 2:4] = 0
         if not self.config.use_missing_flag:
             missing_flag = torch.zeros_like(missing_flag)
         condition = self.context_mlp(torch.cat([context, missing_flag], dim=1))
@@ -649,6 +756,7 @@ def train_fold(
     seed_everything(config.seed + fold["fold"])
     config.model_dir.mkdir(parents=True, exist_ok=True)
 
+    dataframe = attach_location_metadata(dataframe, config)
     train_frame = dataframe.iloc[fold["train_indices"]].copy()
     validation_frame = dataframe.iloc[fold["validation_indices"]].copy()
     train_directories = satellite_directories(config, "train")
@@ -835,6 +943,7 @@ def predict_fold(
     device: torch.device,
 ) -> np.ndarray:
     model, stats = load_fold_model(config, fold, device)
+    dataframe = attach_location_metadata(dataframe, config)
     dataset = NowcastingDataset(
         dataframe,
         satellite_directories(config, "evaluation"),
