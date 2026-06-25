@@ -50,6 +50,9 @@ def run(args: argparse.Namespace) -> Path:
         lr_encoder=args.lr_encoder,
         lr_head=args.lr_head,
         loss_type=args.loss_type,
+        heavy_rain_weight_alpha=args.heavy_rain_weight_alpha,
+        heavy_rain_weight_scale=args.heavy_rain_weight_scale,
+        heavy_rain_weight_max=args.heavy_rain_weight_max,
         workers=args.workers,
         stats_samples_per_satellite=args.stats_samples_per_satellite,
         seed=args.seed,
@@ -101,7 +104,12 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr-encoder", type=float, default=2e-5)
     parser.add_argument("--lr-head", type=float, default=1e-4)
-    parser.add_argument("--loss-type", default="huber", choices=["huber", "log_mse"])
+    parser.add_argument(
+        "--loss-type", default="huber", choices=["huber", "log_mse", "weighted_huber"]
+    )
+    parser.add_argument("--heavy-rain-weight-alpha", type=float, default=0.5)
+    parser.add_argument("--heavy-rain-weight-scale", type=float, default=10.0)
+    parser.add_argument("--heavy-rain-weight-max", type=float, default=2.0)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--stats-samples-per-satellite", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=42)

@@ -66,6 +66,9 @@ class Config:
     weight_decay: float = 1e-4
     huber_delta: float = 1.0
     loss_type: str = "huber"
+    heavy_rain_weight_alpha: float = 0.5
+    heavy_rain_weight_scale: float = 10.0
+    heavy_rain_weight_max: float = 2.0
     workers: int = 2
     stats_samples_per_satellite: int | None = 1500
     seed: int = 42
@@ -608,6 +611,34 @@ def original_scale_rmse(
     return squared_error, targets.numel()
 
 
+def make_training_loss(config: Config) -> nn.Module:
+    if config.loss_type == "huber":
+        return nn.HuberLoss(delta=config.huber_delta)
+    if config.loss_type == "log_mse":
+        return nn.MSELoss()
+    if config.loss_type == "weighted_huber":
+        return nn.HuberLoss(delta=config.huber_delta, reduction="none")
+    raise ValueError(f"Unknown loss_type: {config.loss_type}")
+
+
+def compute_training_loss(
+    criterion: nn.Module,
+    predictions: torch.Tensor,
+    targets: torch.Tensor,
+    config: Config,
+) -> torch.Tensor:
+    if config.loss_type != "weighted_huber":
+        return criterion(predictions, targets)
+    element_loss = criterion(predictions, targets)
+    target_original = torch.expm1(targets).clamp(min=0)
+    weight = 1.0 + config.heavy_rain_weight_alpha * torch.clamp(
+        target_original / config.heavy_rain_weight_scale,
+        min=0,
+        max=config.heavy_rain_weight_max,
+    )
+    return (element_loss * weight).mean()
+
+
 def train_fold(
     config: Config,
     dataframe: pd.DataFrame,
@@ -665,12 +696,7 @@ def train_fold(
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=config.epochs
     )
-    if config.loss_type == "huber":
-        criterion = nn.HuberLoss(delta=config.huber_delta)
-    elif config.loss_type == "log_mse":
-        criterion = nn.MSELoss()
-    else:
-        raise ValueError(f"Unknown loss_type: {config.loss_type}")
+    criterion = make_training_loss(config)
     amp_enabled = config.use_amp and device.type == "cuda"
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
 
@@ -697,7 +723,7 @@ def train_fold(
                 enabled=amp_enabled,
             ):
                 prediction = model(image, satellite_id, temporal, missing)
-                loss = criterion(prediction, target)
+                loss = compute_training_loss(criterion, prediction, target, config)
             if not torch.isfinite(loss):
                 raise FloatingPointError(
                     f"Non-finite training loss at fold={fold['fold']} epoch={epoch}"
