@@ -1,0 +1,16 @@
+{
+  "id": "suioshion/solafune-swin-geo-context-ablation",
+  "title": "Solafune Swin Geo Context Ablation",
+  "code_file": "swin_geo_context_ablation.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2"
+  ],
+  "kernel_sources": [
+    "suioshion/solafune-swin-temporal-geo"
+  ]
+}

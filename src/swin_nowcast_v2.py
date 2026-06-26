@@ -83,6 +83,9 @@ class Config:
     use_temporal_summary: bool = False
     use_location_features: bool = False
     location_metadata_path: str | None = None
+    disable_geo_position_features: bool = False
+    disable_local_time_features: bool = False
+    disable_geo_season_features: bool = False
     band_mode: str = "matched6"
     use_satellite_normalization: bool = True
     swin_model_subdir: str = "swin_v2"
@@ -620,6 +623,13 @@ class SwinNowcaster(nn.Module):
             context[:, :2] = 0
         if not self.config.use_hour_features:
             context[:, 2:4] = 0
+        if self.config.use_location_features:
+            if self.config.disable_geo_position_features:
+                context[:, 4:10] = 0
+            if self.config.disable_local_time_features:
+                context[:, 10:12] = 0
+            if self.config.disable_geo_season_features:
+                context[:, 12:14] = 0
         if not self.config.use_missing_flag:
             missing_flag = torch.zeros_like(missing_flag)
         condition = self.context_mlp(torch.cat([context, missing_flag], dim=1))
