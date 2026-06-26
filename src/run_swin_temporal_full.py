@@ -62,6 +62,7 @@ def run(args: argparse.Namespace) -> Path:
         use_temporal_summary=True,
         use_location_features=args.use_location_features,
         location_metadata_path=args.location_metadata_path,
+        location_feature_mode=args.location_feature_mode,
         swin_model_subdir=args.model_subdir,
         band_stats_root=str(write_stats_dir),
     )
@@ -119,6 +120,7 @@ def main() -> None:
     parser.add_argument("--band-stats-root", default=None)
     parser.add_argument("--use-location-features", action="store_true")
     parser.add_argument("--location-metadata-path", default=None)
+    parser.add_argument("--location-feature-mode", default="full", choices=["full", "local_time"])
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-amp", action="store_true")
     args = parser.parse_args()

@@ -83,6 +83,7 @@ class Config:
     use_temporal_summary: bool = False
     use_location_features: bool = False
     location_metadata_path: str | None = None
+    location_feature_mode: str = "full"
     disable_geo_position_features: bool = False
     disable_local_time_features: bool = False
     disable_geo_season_features: bool = False
@@ -241,14 +242,26 @@ def location_features(row: pd.Series) -> np.ndarray:
 def context_features(row: pd.Series, config: Config) -> np.ndarray:
     features = [time_features(row["datetime"])]
     if config.use_location_features:
-        features.append(location_features(row))
+        geo_features = location_features(row)
+        if config.location_feature_mode == "full":
+            features.append(geo_features)
+        elif config.location_feature_mode == "local_time":
+            features.append(geo_features[6:8])
+        else:
+            raise ValueError(f"Unknown location_feature_mode: {config.location_feature_mode}")
     return np.concatenate(features).astype(np.float32)
 
 
 def context_feature_count(config: Config) -> int:
-    return len(time_features(pd.Timestamp("2000-01-01"))) + (
-        10 if config.use_location_features else 0
-    )
+    count = len(time_features(pd.Timestamp("2000-01-01")))
+    if config.use_location_features:
+        if config.location_feature_mode == "full":
+            count += 10
+        elif config.location_feature_mode == "local_time":
+            count += 2
+        else:
+            raise ValueError(f"Unknown location_feature_mode: {config.location_feature_mode}")
+    return count
 
 
 def satellite_directories(config: Config, split: str) -> dict[str, Path]:
@@ -624,12 +637,16 @@ class SwinNowcaster(nn.Module):
         if not self.config.use_hour_features:
             context[:, 2:4] = 0
         if self.config.use_location_features:
-            if self.config.disable_geo_position_features:
-                context[:, 4:10] = 0
-            if self.config.disable_local_time_features:
-                context[:, 10:12] = 0
-            if self.config.disable_geo_season_features:
-                context[:, 12:14] = 0
+            if self.config.location_feature_mode == "full":
+                if self.config.disable_geo_position_features:
+                    context[:, 4:10] = 0
+                if self.config.disable_local_time_features:
+                    context[:, 10:12] = 0
+                if self.config.disable_geo_season_features:
+                    context[:, 12:14] = 0
+            elif self.config.location_feature_mode == "local_time":
+                if self.config.disable_local_time_features:
+                    context[:, 4:6] = 0
         if not self.config.use_missing_flag:
             missing_flag = torch.zeros_like(missing_flag)
         condition = self.context_mlp(torch.cat([context, missing_flag], dim=1))
