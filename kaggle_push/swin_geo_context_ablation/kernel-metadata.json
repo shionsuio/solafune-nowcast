@@ -11,6 +11,6 @@
     "suioshion/solafune-dataset-v2"
   ],
   "kernel_sources": [
-    "suioshion/solafune-swin-temporal-geo"
+    "suioshion/solafune-swin-temporal-geo/2"
   ]
 }
