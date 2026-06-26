@@ -9,6 +9,10 @@
   "enable_internet": true,
   "dataset_sources": [
     "suioshion/solafune-dataset-v2",
-    "suioshion/swin-temporal-stable-models"
+    "suioshion/swin-temporal-stable-fold2",
+    "suioshion/swin-temporal-models-fold34"
+  ],
+  "kernel_sources": [
+    "suioshion/solafune-swin-temporal-full"
   ]
 }
