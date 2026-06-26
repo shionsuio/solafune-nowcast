@@ -1,0 +1,14 @@
+{
+  "id": "suioshion/solafune-swin-oof-diagnostics",
+  "title": "Solafune Swin OOF Diagnostics",
+  "code_file": "swin_oof_diagnostics.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2",
+    "suioshion/swin-temporal-stable-models"
+  ]
+}
