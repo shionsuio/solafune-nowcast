@@ -217,6 +217,7 @@ def run(args: argparse.Namespace) -> Path:
         workers=args.workers,
         pretrained=False,
         use_amp=not args.no_amp,
+        use_two_head=args.use_two_head,
         use_temporal_differences=args.use_temporal_differences,
         use_temporal_summary=args.use_temporal_summary,
         use_location_features=args.use_location_features,
@@ -276,6 +277,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="outputs/oof_swin_v2_temporal_stable")
     parser.add_argument("--use-temporal-differences", action="store_true")
     parser.add_argument("--use-temporal-summary", action="store_true")
+    parser.add_argument("--use-two-head", action="store_true")
     parser.add_argument("--use-location-features", action="store_true")
     parser.add_argument("--location-metadata-path", default=None)
     parser.add_argument("--no-amp", action="store_true")

@@ -1,0 +1,22 @@
+{
+  "id": "suioshion/solafune-swin-oof-model-compare",
+  "title": "Solafune Swin OOF Model Compare",
+  "code_file": "run_swin_oof_model_compare.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2",
+    "suioshion/swin-temporal-models-fold34"
+  ],
+  "kernel_sources": [
+    "suioshion/solafune-swin-temporal-full/6",
+    "suioshion/solafune-swin-temporal-full/7",
+    "suioshion/solafune-swin-loss-experiment/2",
+    "suioshion/solafune-swin-two-head",
+    "suioshion/solafune-swin-two-head-fold1",
+    "suioshion/solafune-swin-two-head-fold2"
+  ]
+}
