@@ -53,6 +53,10 @@ def run(args: argparse.Namespace) -> Path:
         heavy_rain_weight_alpha=args.heavy_rain_weight_alpha,
         heavy_rain_weight_scale=args.heavy_rain_weight_scale,
         heavy_rain_weight_max=args.heavy_rain_weight_max,
+        use_two_head=args.use_two_head,
+        rain_bce_weight_0_1=args.rain_bce_weight_0_1,
+        rain_bce_weight_1=args.rain_bce_weight_1,
+        rain_bce_weight_5=args.rain_bce_weight_5,
         workers=args.workers,
         stats_samples_per_satellite=args.stats_samples_per_satellite,
         seed=args.seed,
@@ -113,6 +117,10 @@ def main() -> None:
     parser.add_argument("--heavy-rain-weight-alpha", type=float, default=0.5)
     parser.add_argument("--heavy-rain-weight-scale", type=float, default=10.0)
     parser.add_argument("--heavy-rain-weight-max", type=float, default=2.0)
+    parser.add_argument("--use-two-head", action="store_true")
+    parser.add_argument("--rain-bce-weight-0-1", type=float, default=0.10)
+    parser.add_argument("--rain-bce-weight-1", type=float, default=0.10)
+    parser.add_argument("--rain-bce-weight-5", type=float, default=0.05)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--stats-samples-per-satellite", type=int, default=1500)
     parser.add_argument("--seed", type=int, default=42)

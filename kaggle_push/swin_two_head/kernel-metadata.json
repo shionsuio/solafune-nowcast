@@ -1,0 +1,14 @@
+{
+  "id": "suioshion/solafune-swin-two-head",
+  "title": "Solafune Swin Two Head",
+  "code_file": "swin_two_head_kaggle.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2",
+    "suioshion/solafune-stat"
+  ]
+}

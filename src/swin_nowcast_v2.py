@@ -69,6 +69,10 @@ class Config:
     heavy_rain_weight_alpha: float = 0.5
     heavy_rain_weight_scale: float = 10.0
     heavy_rain_weight_max: float = 2.0
+    use_two_head: bool = False
+    rain_bce_weight_0_1: float = 0.10
+    rain_bce_weight_1: float = 0.10
+    rain_bce_weight_5: float = 0.05
     workers: int = 2
     stats_samples_per_satellite: int | None = 1500
     seed: int = 42
@@ -612,10 +616,11 @@ class SwinNowcaster(nn.Module):
             nn.GELU(),
             nn.Linear(condition_size, condition_size),
         )
+        output_channels = 4 if config.use_two_head else 1
         self.head = nn.Sequential(
             nn.Conv2d(config.decoder_channels, 64, 3, padding=1),
             nn.GELU(),
-            nn.Conv2d(64, 1, 1),
+            nn.Conv2d(64, output_channels, 1),
         )
 
     def forward(
@@ -624,7 +629,8 @@ class SwinNowcaster(nn.Module):
         satellite_id: torch.Tensor,
         temporal_features: torch.Tensor,
         missing_flag: torch.Tensor,
-    ) -> torch.Tensor:
+        return_aux: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         if self.config.use_satellite_stem:
             image = self.stem(image, satellite_id)
         else:
@@ -653,13 +659,23 @@ class SwinNowcaster(nn.Module):
         if self.config.use_satellite_embedding:
             condition = condition + self.satellite_embedding(satellite_id)
         decoded = decoded + condition[:, :, None, None]
-        prediction = self.head(decoded)
-        return F.interpolate(
-            prediction,
+        output = self.head(decoded)
+        output = F.interpolate(
+            output,
             size=(self.config.target_size, self.config.target_size),
             mode="bilinear",
             align_corners=False,
         )
+        if not self.config.use_two_head:
+            return output
+
+        amount_log = F.softplus(output[:, :1])
+        rain_logits = output[:, 1:]
+        rain_probability = torch.sigmoid(rain_logits[:, :1])
+        prediction = amount_log * rain_probability
+        if return_aux:
+            return prediction, rain_logits
+        return prediction
 
 
 def make_folds(dataframe: pd.DataFrame, n_folds: int) -> list[dict]:
@@ -760,17 +776,45 @@ def compute_training_loss(
     predictions: torch.Tensor,
     targets: torch.Tensor,
     config: Config,
+    rain_logits: torch.Tensor | None = None,
 ) -> torch.Tensor:
     if config.loss_type != "weighted_huber":
-        return criterion(predictions, targets)
-    element_loss = criterion(predictions, targets)
+        base_loss = criterion(predictions, targets)
+    else:
+        element_loss = criterion(predictions, targets)
+        target_original = torch.expm1(targets).clamp(min=0)
+        weight = 1.0 + config.heavy_rain_weight_alpha * torch.clamp(
+            target_original / config.heavy_rain_weight_scale,
+            min=0,
+            max=config.heavy_rain_weight_max,
+        )
+        base_loss = (element_loss * weight).mean()
+
+    if not config.use_two_head:
+        return base_loss
+    if rain_logits is None:
+        raise ValueError("rain_logits are required when use_two_head=True")
+
     target_original = torch.expm1(targets).clamp(min=0)
-    weight = 1.0 + config.heavy_rain_weight_alpha * torch.clamp(
-        target_original / config.heavy_rain_weight_scale,
-        min=0,
-        max=config.heavy_rain_weight_max,
+    rain_targets = torch.cat(
+        [
+            (target_original >= 0.1).float(),
+            (target_original >= 1.0).float(),
+            (target_original >= 5.0).float(),
+        ],
+        dim=1,
     )
-    return (element_loss * weight).mean()
+    bce = F.binary_cross_entropy_with_logits(rain_logits, rain_targets, reduction="none")
+    bce_weights = torch.tensor(
+        [
+            config.rain_bce_weight_0_1,
+            config.rain_bce_weight_1,
+            config.rain_bce_weight_5,
+        ],
+        device=rain_logits.device,
+        dtype=rain_logits.dtype,
+    )[None, :, None, None]
+    return base_loss + (bce * bce_weights).mean()
 
 
 def train_fold(
@@ -857,8 +901,20 @@ def train_fold(
                 dtype=torch.float16,
                 enabled=amp_enabled,
             ):
-                prediction = model(image, satellite_id, temporal, missing)
-                loss = compute_training_loss(criterion, prediction, target, config)
+                if config.use_two_head:
+                    prediction, rain_logits = model(
+                        image,
+                        satellite_id,
+                        temporal,
+                        missing,
+                        return_aux=True,
+                    )
+                else:
+                    prediction = model(image, satellite_id, temporal, missing)
+                    rain_logits = None
+                loss = compute_training_loss(
+                    criterion, prediction, target, config, rain_logits
+                )
             if not torch.isfinite(loss):
                 raise FloatingPointError(
                     f"Non-finite training loss at fold={fold['fold']} epoch={epoch}"
