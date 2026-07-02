@@ -110,6 +110,9 @@ class Config:
     location_feature_mode: str = "full"
     sample_weight_path: str | None = None
     sample_weight_column: str = "weight_sqrt_clipped"
+    pseudo_label_npz: str | None = None
+    pseudo_label_csv: str | None = None
+    pseudo_sample_weight: float = 1.0
     disable_geo_position_features: bool = False
     disable_local_time_features: bool = False
     disable_geo_season_features: bool = False
@@ -256,6 +259,32 @@ def attach_sample_weights(dataframe: pd.DataFrame, config: Config) -> pd.DataFra
         raise ValueError(f"Sample weights missing for {missing_count} rows")
     merged["sample_weight"] = merged["sample_weight"].clip(lower=0.05, upper=20.0)
     return merged
+
+
+def load_pseudo_labels(config: Config) -> tuple[pd.DataFrame, np.ndarray] | None:
+    """Load transductive pseudo-labels for evaluation samples.
+
+    Returns a metadata frame (rows from evaluation_target.csv, flagged with
+    is_eval/pseudo_index/sample_weight) and the prediction array in mm/h.
+    """
+    if not config.pseudo_label_npz or not config.pseudo_label_csv:
+        return None
+    if config.use_location_features:
+        raise ValueError("Pseudo labels are not supported with use_location_features")
+    predictions = np.load(config.pseudo_label_npz)["predictions"].astype(np.float32)
+    index_frame = pd.read_csv(config.pseudo_label_csv)
+    if len(index_frame) != len(predictions):
+        raise ValueError(
+            f"Pseudo index rows ({len(index_frame)}) != predictions ({len(predictions)})"
+        )
+    evaluation_frame = prepare_metadata(
+        config.paths.evaluation_dir / "evaluation_target.csv"
+    ).set_index("unique_id")
+    pseudo_frame = evaluation_frame.loc[index_frame["unique_id"]].reset_index()
+    pseudo_frame["is_eval"] = True
+    pseudo_frame["pseudo_index"] = np.arange(len(pseudo_frame))
+    pseudo_frame["sample_weight"] = float(config.pseudo_sample_weight)
+    return pseudo_frame, predictions
 
 
 def location_features(row: pd.Series) -> np.ndarray:
@@ -435,6 +464,8 @@ class NowcastingDataset(Dataset):
         config: Config,
         has_target: bool,
         augment: bool = False,
+        pseudo_targets: np.ndarray | None = None,
+        eval_directories: dict[str, Path] | None = None,
     ) -> None:
         self.dataframe = dataframe.reset_index(drop=True)
         self.directories = directories
@@ -442,6 +473,8 @@ class NowcastingDataset(Dataset):
         self.config = config
         self.has_target = has_target
         self.augment = augment
+        self.pseudo_targets = pseudo_targets
+        self.eval_directories = eval_directories
         self.gpm_dir = config.paths.gpm_dir
         self.band_mapping = get_band_mapping(config)
 
@@ -490,10 +523,14 @@ class NowcastingDataset(Dataset):
         files = row["observation_files"]
         missing = float(len(files) == 0)
 
+        directories = self.directories
+        if self.eval_directories is not None and bool(row.get("is_eval", False)):
+            directories = self.eval_directories
+
         observations = []
         for observation_index in range(self.config.max_observations):
             if observation_index < len(files):
-                path = self.directories[satellite] / files[observation_index]
+                path = directories[satellite] / files[observation_index]
                 observations.append(self._read_observation(path, satellite))
             else:
                 observations.append(
@@ -520,7 +557,11 @@ class NowcastingDataset(Dataset):
             )
         image = np.concatenate(image_features, axis=0)
 
-        if self.has_target:
+        pseudo_index = int(row.get("pseudo_index", -1))
+        if self.pseudo_targets is not None and pseudo_index >= 0:
+            pseudo = self.pseudo_targets[pseudo_index].astype(np.float32)
+            target = np.log1p(np.clip(pseudo, 0, None))[None]
+        elif self.has_target:
             target = self._read_target(self.gpm_dir / row["gpm_imerg_filename"])
         else:
             target = np.zeros(
@@ -933,8 +974,37 @@ def train_fold(
         )
         save_stats(stats, stats_path)
 
+    pseudo_targets = None
+    eval_directories = None
+    pseudo = load_pseudo_labels(config)
+    if pseudo is not None:
+        pseudo_frame, pseudo_targets = pseudo
+        train_frame = pd.concat([train_frame, pseudo_frame], ignore_index=True)
+        train_frame["pseudo_index"] = (
+            train_frame.get("pseudo_index", pd.Series(-1, index=train_frame.index))
+            .fillna(-1)
+            .astype(int)
+        )
+        train_frame["is_eval"] = (
+            train_frame.get("is_eval", pd.Series(False, index=train_frame.index))
+            .fillna(False)
+            .astype(bool)
+        )
+        eval_directories = satellite_directories(config, "evaluation")
+        print(
+            f"Fold {fold['fold']}: appended {len(pseudo_frame)} pseudo-labeled eval samples "
+            f"(weight={config.pseudo_sample_weight})"
+        )
+
     train_dataset = NowcastingDataset(
-        train_frame, train_directories, stats, config, has_target=True, augment=True
+        train_frame,
+        train_directories,
+        stats,
+        config,
+        has_target=True,
+        augment=True,
+        pseudo_targets=pseudo_targets,
+        eval_directories=eval_directories,
     )
     validation_dataset = NowcastingDataset(
         validation_frame,

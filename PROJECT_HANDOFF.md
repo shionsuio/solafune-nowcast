@@ -398,10 +398,25 @@ OOF 診断では強雨を潰している。
 
 運営への質問ドラフト作成済み（eval入力のtransductive自己学習の可否）。回答まで実装保留。
 
-### E. two-head fold3/4 学習
+### E. two-head fold3/4 学習 → 完了、5-foldブレンドがCV最良
 
-- `kaggle_push/swin_two_head_fold3/`, `swin_two_head_fold4/` をfold1テンプレから作成し**投入済み**（2026-07-02）
-- 完了後: checkpoint回収 → 5-fold two-headアンサンブル → OOF export → fold2 pooled RMSEで提出判断
+- fold3 val RMSE 0.8936（ep6）、fold4 0.8871（ep7）。checkpoint回収済み → `models/swin_v2_temporal_two_head_oof/`（5fold揃った）
+- OOF export済み（fold3/4追加）。**5-fold pooled RMSE比較:**
+
+| 構成 | pooled RMSE |
+|---|---:|
+| stable×5 | 1.076244 |
+| twohead×5 | 1.072928 |
+| 現行mixed（th f0,f2 + st f1,f3,f4）= LB 0.66750 | 1.068755 |
+| **twohead50% + stable50%（10モデル）** | **1.063764** |
+
+- weight掃引はw=0.5〜0.55でフラット。衛星別最適（hima 0.5 / goes 0.7 / meteo 0.4）は差が小さく過学習リスクがあるため一律0.5を採用
+- 提出カーネル: `kaggle_push/swin_two_head_full_submit/`（出力: submission_twohead50_stable50_5x5.zip）
+- Kaggle dataset: `swin-two-head-full-models`（two-head 5fold）+ `swin-temporal-stable-models`（stable 5fold、初アップロード）
+
+### F. BTDアブレーション（進行中）
+
+- カーネル `solafune-swin-btd-fold2` 投入済み（スラッグは two-head-btd-fold2 だと "Notebook not found" になったためリネーム）。fold2 two-head（val 1.2268）との直接比較
 
 ## 注意点
 
