@@ -67,6 +67,9 @@ def run(args: argparse.Namespace) -> Path:
         use_location_features=args.use_location_features,
         location_metadata_path=args.location_metadata_path,
         location_feature_mode=args.location_feature_mode,
+        sample_weight_path=getattr(args, "sample_weight_path", None),
+        sample_weight_column=getattr(args, "sample_weight_column", "weight_sqrt_clipped"),
+        band_mode=getattr(args, "band_mode", "matched6"),
         swin_model_subdir=args.model_subdir,
         band_stats_root=str(write_stats_dir),
     )
@@ -129,6 +132,9 @@ def main() -> None:
     parser.add_argument("--use-location-features", action="store_true")
     parser.add_argument("--location-metadata-path", default=None)
     parser.add_argument("--location-feature-mode", default="full", choices=["full", "local_time"])
+    parser.add_argument("--sample-weight-path", default=None)
+    parser.add_argument("--sample-weight-column", default="weight_sqrt_clipped")
+    parser.add_argument("--band-mode", default="matched6", choices=["legacy3", "matched6", "matched6_btd"])
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-amp", action="store_true")
     args = parser.parse_args()

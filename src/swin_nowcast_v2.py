@@ -49,6 +49,26 @@ SATELLITE_BANDS = {
 }
 LEGACY_THREE_BANDS = {satellite: (1, 2, 3) for satellite in SATELLITES}
 
+# Brightness-temperature differences over matched6 channel indices:
+# split-window (clean IR - dirty IR), WV-IR (overshooting tops), upper-lower WV.
+BTD_PAIRS = ((4, 5), (2, 4), (2, 3))
+
+
+def uses_btd(config: "Config") -> bool:
+    return config.band_mode == "matched6_btd"
+
+
+def append_btd_channels(data: np.ndarray) -> np.ndarray:
+    btd = np.stack([data[i] - data[j] for i, j in BTD_PAIRS])
+    return np.concatenate([data, btd], axis=0)
+
+
+def input_channel_count(config: "Config", satellite: str) -> int:
+    count = len(get_band_mapping(config)[satellite])
+    if uses_btd(config):
+        count += len(BTD_PAIRS)
+    return count
+
 
 @dataclass
 class Config:
@@ -88,6 +108,8 @@ class Config:
     use_location_features: bool = False
     location_metadata_path: str | None = None
     location_feature_mode: str = "full"
+    sample_weight_path: str | None = None
+    sample_weight_column: str = "weight_sqrt_clipped"
     disable_geo_position_features: bool = False
     disable_local_time_features: bool = False
     disable_geo_season_features: bool = False
@@ -212,6 +234,30 @@ def attach_location_metadata(
     return merged
 
 
+def attach_sample_weights(dataframe: pd.DataFrame, config: Config) -> pd.DataFrame:
+    """Attach optional per-sample training weights by unique_id."""
+    dataframe = dataframe.copy()
+    if not config.sample_weight_path:
+        dataframe["sample_weight"] = 1.0
+        return dataframe
+    weights = pd.read_csv(config.sample_weight_path)
+    required = {"unique_id", config.sample_weight_column}
+    missing = required - set(weights.columns)
+    if missing:
+        raise ValueError(f"Sample weight file is missing columns: {sorted(missing)}")
+    weights = weights[["unique_id", config.sample_weight_column]].copy()
+    weights = weights.rename(columns={config.sample_weight_column: "sample_weight"})
+    weights["sample_weight"] = pd.to_numeric(
+        weights["sample_weight"], errors="coerce"
+    )
+    merged = dataframe.merge(weights, on="unique_id", how="left", validate="one_to_one")
+    if merged["sample_weight"].isna().any():
+        missing_count = int(merged["sample_weight"].isna().sum())
+        raise ValueError(f"Sample weights missing for {missing_count} rows")
+    merged["sample_weight"] = merged["sample_weight"].clip(lower=0.05, upper=20.0)
+    return merged
+
+
 def location_features(row: pd.Series) -> np.ndarray:
     """Continuous geospatial/time features derived from manual coordinates."""
     latitude = float(row["latitude"])
@@ -276,7 +322,7 @@ def satellite_directories(config: Config, split: str) -> dict[str, Path]:
 def get_band_mapping(config: Config) -> dict[str, tuple[int, ...]]:
     if config.band_mode == "legacy3":
         return LEGACY_THREE_BANDS
-    if config.band_mode == "matched6":
+    if config.band_mode in ("matched6", "matched6_btd"):
         return SATELLITE_BANDS
     raise ValueError(f"Unknown band_mode: {config.band_mode}")
 
@@ -288,6 +334,7 @@ def compute_band_stats(
     seed: int,
     band_mapping: dict[str, tuple[int, ...]] | None = None,
     include_shared: bool = False,
+    append_btd: bool = False,
 ) -> dict[str, dict[str, np.ndarray]]:
     """Compute fold-train-only statistics for matched physical channels."""
     band_mapping = band_mapping or SATELLITE_BANDS
@@ -303,7 +350,8 @@ def compute_band_stats(
             rows = rows.sample(max_samples_per_satellite, random_state=seed)
 
         bands = band_mapping[satellite]
-        sums = np.zeros(len(bands), dtype=np.float64)
+        channel_count = len(bands) + (len(BTD_PAIRS) if append_btd else 0)
+        sums = np.zeros(channel_count, dtype=np.float64)
         squared_sums = np.zeros_like(sums)
         counts = np.zeros_like(sums)
 
@@ -321,6 +369,8 @@ def compute_band_stats(
                     if src.count < max(bands):
                         continue
                     data = src.read(bands).astype(np.float64)
+                if append_btd:
+                    data = append_btd_channels(data)
                 flat = data.reshape(data.shape[0], -1)
                 sums += flat.sum(axis=1)
                 squared_sums += np.square(flat).sum(axis=1)
@@ -404,13 +454,15 @@ class NowcastingDataset(Dataset):
             if src.count < max(bands):
                 return np.zeros(
                     (
-                        len(bands),
+                        input_channel_count(self.config, satellite),
                         self.config.encoder_size,
                         self.config.encoder_size,
                     ),
                     dtype=np.float32,
                 )
             data = src.read(bands).astype(np.float32)
+        if uses_btd(self.config):
+            data = append_btd_channels(data)
         stats_key = satellite if self.config.use_satellite_normalization else "shared"
         mean = self.stats[stats_key]["mean"][:, None, None]
         std = self.stats[stats_key]["std"][:, None, None]
@@ -447,7 +499,7 @@ class NowcastingDataset(Dataset):
                 observations.append(
                     np.zeros(
                         (
-                            len(self.band_mapping[satellite]),
+                            input_channel_count(self.config, satellite),
                             self.config.encoder_size,
                             self.config.encoder_size,
                         ),
@@ -490,6 +542,9 @@ class NowcastingDataset(Dataset):
         metadata = {
             "unique_id": row["unique_id"],
             "gpm_imerg_filename": row["gpm_imerg_filename"],
+            "sample_weight": torch.tensor(
+                float(row.get("sample_weight", 1.0)), dtype=torch.float32
+            ),
         }
         return (
             torch.from_numpy(image),
@@ -579,7 +634,7 @@ class SwinNowcaster(nn.Module):
     def __init__(self, config: Config) -> None:
         super().__init__()
         band_mapping = get_band_mapping(config)
-        band_count = len(next(iter(band_mapping.values())))
+        band_count = input_channel_count(config, next(iter(band_mapping)))
         raw_channels = band_count * config.max_observations
         if config.use_temporal_differences:
             raw_channels += band_count * (config.max_observations - 1)
@@ -777,9 +832,34 @@ def compute_training_loss(
     targets: torch.Tensor,
     config: Config,
     rain_logits: torch.Tensor | None = None,
+    sample_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
+    if sample_weight is not None:
+        sample_weight = sample_weight.to(
+            device=predictions.device, dtype=predictions.dtype
+        ).view(-1)
+        sample_weight = torch.clamp(sample_weight, min=0.05, max=20.0)
+        weight_denominator = sample_weight.sum().clamp_min(1e-6)
+    else:
+        weight_denominator = None
+
     if config.loss_type != "weighted_huber":
-        base_loss = criterion(predictions, targets)
+        if sample_weight is None:
+            base_loss = criterion(predictions, targets)
+        else:
+            if config.loss_type == "huber":
+                element_loss = F.huber_loss(
+                    predictions,
+                    targets,
+                    delta=config.huber_delta,
+                    reduction="none",
+                )
+            elif config.loss_type == "log_mse":
+                element_loss = F.mse_loss(predictions, targets, reduction="none")
+            else:
+                raise ValueError(f"Unknown loss_type: {config.loss_type}")
+            sample_loss = element_loss.flatten(1).mean(dim=1)
+            base_loss = (sample_loss * sample_weight).sum() / weight_denominator
     else:
         element_loss = criterion(predictions, targets)
         target_original = torch.expm1(targets).clamp(min=0)
@@ -788,7 +868,12 @@ def compute_training_loss(
             min=0,
             max=config.heavy_rain_weight_max,
         )
-        base_loss = (element_loss * weight).mean()
+        weighted_element_loss = element_loss * weight
+        if sample_weight is None:
+            base_loss = weighted_element_loss.mean()
+        else:
+            sample_loss = weighted_element_loss.flatten(1).mean(dim=1)
+            base_loss = (sample_loss * sample_weight).sum() / weight_denominator
 
     if not config.use_two_head:
         return base_loss
@@ -814,7 +899,10 @@ def compute_training_loss(
         device=rain_logits.device,
         dtype=rain_logits.dtype,
     )[None, :, None, None]
-    return base_loss + (bce * bce_weights).mean()
+    bce_loss = (bce * bce_weights).flatten(1).mean(dim=1)
+    if sample_weight is None:
+        return base_loss + bce_loss.mean()
+    return base_loss + (bce_loss * sample_weight).sum() / weight_denominator
 
 
 def train_fold(
@@ -828,6 +916,7 @@ def train_fold(
     config.model_dir.mkdir(parents=True, exist_ok=True)
 
     dataframe = attach_location_metadata(dataframe, config)
+    dataframe = attach_sample_weights(dataframe, config)
     train_frame = dataframe.iloc[fold["train_indices"]].copy()
     validation_frame = dataframe.iloc[fold["validation_indices"]].copy()
     train_directories = satellite_directories(config, "train")
@@ -840,6 +929,7 @@ def train_fold(
             train_directories,
             config.stats_samples_per_satellite,
             config.seed + fold["fold"],
+            append_btd=uses_btd(config),
         )
         save_stats(stats, stats_path)
 
@@ -887,7 +977,7 @@ def train_fold(
         model.train()
         loss_sum = 0.0
         sample_count = 0
-        for image, satellite_id, temporal, missing, target, _ in tqdm(
+        for image, satellite_id, temporal, missing, target, metadata in tqdm(
             train_loader, desc=f"Fold {fold['fold']} epoch {epoch}", leave=False
         ):
             image = image.to(device, non_blocking=True)
@@ -895,6 +985,9 @@ def train_fold(
             temporal = temporal.to(device, non_blocking=True)
             missing = missing.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
+            sample_weight = metadata.get("sample_weight")
+            if sample_weight is not None:
+                sample_weight = sample_weight.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(
                 device_type=device.type,
@@ -913,7 +1006,12 @@ def train_fold(
                     prediction = model(image, satellite_id, temporal, missing)
                     rain_logits = None
                 loss = compute_training_loss(
-                    criterion, prediction, target, config, rain_logits
+                    criterion,
+                    prediction,
+                    target,
+                    config,
+                    rain_logits,
+                    sample_weight=sample_weight,
                 )
             if not torch.isfinite(loss):
                 raise FloatingPointError(

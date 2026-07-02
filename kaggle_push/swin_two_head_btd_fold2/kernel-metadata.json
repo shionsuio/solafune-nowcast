@@ -1,0 +1,14 @@
+{
+  "id": "suioshion/solafune-swin-two-head-btd-fold2",
+  "title": "Solafune Swin Two Head BTD Fold2",
+  "code_file": "run_swin_two_head_btd_fold2.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2",
+    "suioshion/solafune-stat"
+  ]
+}
