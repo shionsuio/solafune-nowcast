@@ -501,6 +501,7 @@ Nominatim geocoding（`data/location_coordinates_geocoded.csv` + `data/GEOCODING
 
 ## 注意点
 
+- **Kaggle TPU（v3-8）も利用可**（ユーザー確認済み2026-07-03）。PyTorch/XLA移植+パリティ検証が必要なため、GPU枠が飽和する局面（10モデル本線再学習など）でのみ検討。
 - Public は test 全体の 35%。Private は全 test。
 - Public に寄せすぎると危険。
 - ただし現時点では Public で一貫して two-head Meteosat が悪いので、Meteosat に two-head を入れるのは避ける。
