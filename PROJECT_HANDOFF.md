@@ -472,6 +472,19 @@ OOF 診断では強雨を潰している。
 - 我々のパイプラインは `src.count < max(bands)` の画像をゼロ埋めしており（swin_nowcast_v2 `_read_observation`）、該当行が採点外になったのは中立〜微プラス。ただし**15ch GOESファイルはチェックを通過してチャネルずれのまま読まれる**（採点外なのでLB影響なし、trainにあればノイズ源）
 - train側の欠損: **GOESのみ10ファイル**（15ch×6、14ch×2、4ch×2 / 30,778中）。Himawari/Meteosatは完備。15ch×6はチャネルずれのままtrainに入っているが10/30,778で無視できる規模。CV validation から除外して新LBメトリクスに揃える改修は優先度低
 
+### J. 「0.68の壁」discussion検証（2026-07-03、ibrahimqasmi氏の分析）
+
+コミュニティ分析の要点: タイル平均完璧オラクル=0.677（壁）、+濡れ/乾きマスク完璧=0.594。壁越え=タイル内降水位置の情報獲得。我々は0.6649で既に壁の下（突破16チーム側）。matched6バンド選定+Swinが位置情報の源泉。
+
+**OOFで検証した結果:**
+
+- **ドリズル切り捨て（投稿者推奨の0.1mm/hr）→ 我々には効果ほぼ無し**。5x5 OOF・5fold平均tile RMSE: 閾値なし0.596057 → 0.02で0.595594（−0.0005が最良）、0.1でほぼ中立、0.2以上で悪化。two-headのrain確率ゲートが既にドリズルを抑制済みのため
+- **rain確率ヘッドの推論時ゲート改変も枯れている**（fold2、`src/export_oof_rain_probs.py`で確率マップ再推論）: hard zero P<0.1が−0.0002で最良、sharpen/soften/binary maskはすべて中立〜悪化。**学習済みソフトゲートはほぼ最適**
+- **選別指標の改善: tile RMSE（コンペ指標=タイル別RMSE平均）を主指標に昇格**。fold2キャリブレーション5件でPearson +0.944（pooled +0.856）、Spearman同+0.9。スケールもLBと一致（OOF 0.533 vs LB 0.667）
+- 含意: 0.594への~0.07は後処理では取れず、**マスク質の向上=入力信号（BTD）・容量（Swin-S）・学習側の改善**が唯一の経路。tail重み付けは悪手（投稿者・我々のweighted_huber結果とも一致）、地点気候特徴は罠（気候平均0.798 < 全ゼロ0.746）
+- aux確率マップ: `outputs/oof_predictions/swin_v2_temporal_two_head_oof_aux/oof_fold2.npz`（amount_log + P0.1/P1/P5）
+- 予備の小口: best zipへのドリズル閾値0.02適用（zip代数のみ、期待−0.0003前後、優先度低）
+
 ## 注意点
 
 - Public は test 全体の 35%。Private は全 test。
