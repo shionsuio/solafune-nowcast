@@ -128,11 +128,17 @@ HG15 → HG20: -0.000053
 
 | model | Public LB |
 |---|---:|
-| U-Net single | `0.6944421608854776` |
-| Swin80 + U-Net20 | `0.6670407255150868` |
-| Swin70 + U-Net30 | `0.6686283274351612` |
+| U-Net single | `0.694462043324256` |
+| Swin80 + U-Net20 | `0.6671065678179597` |
+| Swin70 + U-Net30 | `0.6686899338875454` |
 
 本線から外してよい。
+
+### ConvNeXt — ネガティブ確定（probe済み、再試行不要）
+
+過去のprobeで大敗: fold0 best 1.4453（Swin stable 1.2848）、fold1 best 1.3032（Swin stable 1.0523）。
+
+**アーキ知見: U-Net弱 + ConvNeXt大敗 → CNN系エンコーダはこのタスクに構造的に不向き。window attention（Swin）が本質的に効いている。** アーキ多様性を狙うなら同系統の容量増し（Swin-S、`kaggle_push/swin_small_fold2/` 準備済み、`encoder_name` Config対応済み）。MaxViT等のconvハイブリッドは期待値低。ConvNeXt fold2カーネルは投入前に中止・削除した。
 
 ### two-head
 

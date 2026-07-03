@@ -1,7 +1,7 @@
 {
-  "id": "suioshion/solafune-swin-convnext-fold2",
-  "title": "Solafune Swin Convnext Fold2",
-  "code_file": "run_swin_convnext_fold2.py",
+  "id": "suioshion/solafune-swin-small-fold2",
+  "title": "Solafune Swin Small Fold2",
+  "code_file": "run_swin_small_fold2.py",
   "language": "python",
   "kernel_type": "script",
   "is_private": true,

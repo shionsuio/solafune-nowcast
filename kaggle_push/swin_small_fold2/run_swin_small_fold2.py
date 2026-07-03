@@ -81,12 +81,12 @@ class Args:
     rain_bce_weight_5 = 0.05
     stats_samples_per_satellite = 1500
     seed = 42
-    model_subdir = "swin_v2_temporal_two_head_convnext_fold2"
+    model_subdir = "swin_v2_temporal_two_head_small_fold2"
     band_stats_root = band_stats_root
     use_location_features = False
     location_metadata_path = None
     location_feature_mode = "full"
-    encoder_name = "convnext_tiny"
+    encoder_name = "swin_small_patch4_window7_224"
     no_pretrained = False
     no_amp = True
 
