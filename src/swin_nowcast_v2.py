@@ -117,6 +117,7 @@ class Config:
     disable_local_time_features: bool = False
     disable_geo_season_features: bool = False
     band_mode: str = "matched6"
+    encoder_name: str = "swin_tiny_patch4_window7_224"
     use_satellite_normalization: bool = True
     swin_model_subdir: str = "swin_v2"
     unet_model_subdir: str = "unet_v2"
@@ -630,8 +631,14 @@ class SatelliteStem(nn.Module):
 
 
 class FPNDecoder(nn.Module):
-    def __init__(self, input_channels: Iterable[int], output_channels: int) -> None:
+    def __init__(
+        self,
+        input_channels: Iterable[int],
+        output_channels: int,
+        features_nhwc: bool = True,
+    ) -> None:
         super().__init__()
+        self.features_nhwc = features_nhwc
         input_channels = list(input_channels)
         self.lateral = nn.ModuleList(
             [nn.Conv2d(channels, output_channels, 1) for channels in input_channels]
@@ -652,8 +659,9 @@ class FPNDecoder(nn.Module):
         )
 
     def forward(self, features: list[torch.Tensor]) -> torch.Tensor:
-        # timm Swin emits NHWC tensors.
-        features = [feature.permute(0, 3, 1, 2).contiguous() for feature in features]
+        if self.features_nhwc:
+            # timm Swin emits NHWC tensors; ConvNeXt-style encoders emit NCHW.
+            features = [feature.permute(0, 3, 1, 2).contiguous() for feature in features]
         lateral = [layer(feature) for layer, feature in zip(self.lateral, features)]
         for index in range(len(lateral) - 2, -1, -1):
             lateral[index] = lateral[index] + F.interpolate(
@@ -698,13 +706,17 @@ class SwinNowcaster(nn.Module):
             nn.GELU(),
         )
         self.encoder = timm.create_model(
-            "swin_tiny_patch4_window7_224",
+            config.encoder_name,
             pretrained=config.pretrained,
             features_only=True,
             in_chans=config.stem_channels,
         )
         feature_channels = self.encoder.feature_info.channels()
-        self.decoder = FPNDecoder(feature_channels, config.decoder_channels)
+        self.decoder = FPNDecoder(
+            feature_channels,
+            config.decoder_channels,
+            features_nhwc="swin" in config.encoder_name,
+        )
         condition_size = config.decoder_channels
         self.satellite_embedding = nn.Embedding(len(SATELLITES), condition_size)
         self.context_mlp = nn.Sequential(

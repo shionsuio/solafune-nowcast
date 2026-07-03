@@ -70,6 +70,7 @@ def run(args: argparse.Namespace) -> Path:
         sample_weight_path=getattr(args, "sample_weight_path", None),
         sample_weight_column=getattr(args, "sample_weight_column", "weight_sqrt_clipped"),
         band_mode=getattr(args, "band_mode", "matched6"),
+        encoder_name=getattr(args, "encoder_name", "swin_tiny_patch4_window7_224"),
         pseudo_label_npz=getattr(args, "pseudo_label_npz", None),
         pseudo_label_csv=getattr(args, "pseudo_label_csv", None),
         pseudo_sample_weight=getattr(args, "pseudo_sample_weight", 1.0),
@@ -138,6 +139,7 @@ def main() -> None:
     parser.add_argument("--sample-weight-path", default=None)
     parser.add_argument("--sample-weight-column", default="weight_sqrt_clipped")
     parser.add_argument("--band-mode", default="matched6", choices=["legacy3", "matched6", "matched6_btd"])
+    parser.add_argument("--encoder-name", default="swin_tiny_patch4_window7_224")
     parser.add_argument("--pseudo-label-npz", default=None)
     parser.add_argument("--pseudo-label-csv", default=None)
     parser.add_argument("--pseudo-sample-weight", type=float, default=1.0)
