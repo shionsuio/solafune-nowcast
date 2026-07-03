@@ -1,6 +1,6 @@
 {
-  "id": "suioshion/solafune-swin-btd-fold0",
-  "title": "Solafune Swin Btd Fold0",
+  "id": "suioshion/solafune-swin-btd-fold0-run",
+  "title": "Solafune Swin Btd Fold0 Run",
   "code_file": "run_swin_btd_fold0.py",
   "language": "python",
   "kernel_type": "script",
