@@ -472,6 +472,20 @@ OOF 診断では強雨を潰している。
 - 我々のパイプラインは `src.count < max(bands)` の画像をゼロ埋めしており（swin_nowcast_v2 `_read_observation`）、該当行が採点外になったのは中立〜微プラス。ただし**15ch GOESファイルはチェックを通過してチャネルずれのまま読まれる**（採点外なのでLB影響なし、trainにあればノイズ源）
 - train側の欠損: **GOESのみ10ファイル**（15ch×6、14ch×2、4ch×2 / 30,778中）。Himawari/Meteosatは完備。15ch×6はチャネルずれのままtrainに入っているが10/30,778で無視できる規模。CV validation から除外して新LBメトリクスに揃える改修は優先度低
 
+### K. location特徴量 fold2スクリーニング（2026-07-03、運営承認済みgeocoding）
+
+Nominatim geocoding（`data/location_coordinates_geocoded.csv` + `data/GEOCODING.md`）でfold2スクリーニング2本を実行。baseline = two-head fold2 val 1.2268。
+
+| mode | best val RMSE | Δ | 備考 |
+|---|---:|---:|---|
+| **full（lat/lon入り10特徴）** | **1.2067 (ep3)** | **−0.0201** | 予想と逆に最大改善。BTD（−0.0119）超え |
+| local_time（太陽時sin/cosのみ） | 1.2182 (ep3) | −0.0086 | 方向は+だが小さい |
+
+- 解釈: fold CVはlocation-disjointなのでval地点は未見 → 暗記ではなく緯度経度からの物理的事前情報（気候帯等）の転移。discussionの「地点気候平均は罠」とは別物（あちらは定数予測）
+- 留保: エポック振れ±0.01、単fold単seed。eval地点への転移はCVで保証されない（adversarial AUC 0.934）
+- チェックポイント: kernel出力 `solafune-swin-local-time-fold2` / `solafune-swin-loc-full-fold2`（models/swin_v2_temporal_two_head_loc_{time,full}_fold2）
+- 次: **loc_full fold0追試**（BTD fold0と同プロトコル）→ 両方確認できたら BTD+loc_full 併用の10モデル再学習を投資判断
+
 ### J. 「0.68の壁」discussion検証（2026-07-03、ibrahimqasmi氏の分析）
 
 コミュニティ分析の要点: タイル平均完璧オラクル=0.677（壁）、+濡れ/乾きマスク完璧=0.594。壁越え=タイル内降水位置の情報獲得。我々は0.6649で既に壁の下（突破16チーム側）。matched6バンド選定+Swinが位置情報の源泉。
