@@ -1,0 +1,14 @@
+{
+  "id": "suioshion/solafune-swin-loc-time-fold2",
+  "title": "Solafune Swin Local Time Fold2",
+  "code_file": "run_swin_loc_time_fold2.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2",
+    "suioshion/solafune-stat"
+  ]
+}
