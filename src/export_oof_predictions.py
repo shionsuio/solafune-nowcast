@@ -133,6 +133,7 @@ def run(args: argparse.Namespace) -> Path:
         use_location_features=False,
         swin_model_subdir=args.model_subdir,
         band_stats_root=str(model_dir),
+        band_mode=args.band_mode,
     )
 
     dataframe = prepare_metadata(config.paths.train_dir / "train_dataset.csv")
@@ -163,6 +164,7 @@ def main() -> None:
     parser.add_argument("--use-temporal-differences", action="store_true")
     parser.add_argument("--use-temporal-summary", action="store_true")
     parser.add_argument("--use-two-head", action="store_true")
+    parser.add_argument("--band-mode", default="matched6")
     parser.add_argument("--save-target", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()

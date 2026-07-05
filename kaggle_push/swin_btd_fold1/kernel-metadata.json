@@ -1,0 +1,14 @@
+{
+  "id": "suioshion/solafune-swin-btd-fold1-run",
+  "title": "Solafune Swin Btd Fold1 Run",
+  "code_file": "run_swin_btd_fold1.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2",
+    "suioshion/solafune-stat"
+  ]
+}

@@ -138,7 +138,11 @@ HG15 → HG20: -0.000053
 
 過去のprobeで大敗: fold0 best 1.4453（Swin stable 1.2848）、fold1 best 1.3032（Swin stable 1.0523）。
 
-**アーキ知見: U-Net弱 + ConvNeXt大敗 → CNN系エンコーダはこのタスクに構造的に不向き。window attention（Swin）が本質的に効いている。** アーキ多様性を狙うなら同系統の容量増し（Swin-S、`kaggle_push/swin_small_fold2/` 準備済み、`encoder_name` Config対応済み）。MaxViT等のconvハイブリッドは期待値低。ConvNeXt fold2カーネルは投入前に中止・削除した。
+**アーキ知見: U-Net弱 + ConvNeXt大敗 → CNN系エンコーダはこのタスクに構造的に不向き。window attention（Swin）が本質的に効いている。** MaxViT等のconvハイブリッドは期待値低。ConvNeXt fold2カーネルは投入前に中止・削除した。
+
+### Swin-S（容量増）— ネガティブ確定（2026-07-03 fold2追試）
+
+`solafune-swin-small-fold2` 完走。best val 1.2314（ep7）vs Swin-T two-head baseline 1.2268 → **+0.0046悪化**。学習曲線も不安定（ep5 1.2852に跳ねる）。容量増は効かない。**エンコーダ方向（CNN・容量増とも）はクローズ。Swin-T が最適点**。BTD・loc_full も fold0 追試で転移せず（→ K2）、学習側の大きなレバーは現状枯渇気味。
 
 ### two-head
 
@@ -484,7 +488,22 @@ Nominatim geocoding（`data/location_coordinates_geocoded.csv` + `data/GEOCODING
 - 解釈: fold CVはlocation-disjointなのでval地点は未見 → 暗記ではなく緯度経度からの物理的事前情報（気候帯等）の転移。discussionの「地点気候平均は罠」とは別物（あちらは定数予測）
 - 留保: エポック振れ±0.01、単fold単seed。eval地点への転移はCVで保証されない（adversarial AUC 0.934）
 - チェックポイント: kernel出力 `solafune-swin-local-time-fold2` / `solafune-swin-loc-full-fold2`（models/swin_v2_temporal_two_head_loc_{time,full}_fold2）
-- 次: **loc_full fold0追試**（BTD fold0と同プロトコル）→ 両方確認できたら BTD+loc_full 併用の10モデル再学習を投資判断
+
+### K2. fold0追試 → 両方とも転移せず（2026-07-04）— 10モデル再学習は見送り
+
+BTD・loc_full を fold0（baseline two-head 1.2742）で追試。**fold2の改善はどちらもfold0に転移しなかった**。
+
+| feature | fold0 Δ | fold1 Δ | fold2 Δ | fold3 Δ | fold4 Δ | 判定 |
+|---|---:|---:|---:|---:|---:|---|
+| BTD | +0.0049 (1.2791) | −0.0087 (1.0340) | −0.0119 (1.2149) | **−0.0187 (0.8749)** | +0.0008 (0.8879) | **3勝1敗1分、平均−0.0067** |
+| loc_full | **+0.0358 (1.3100)** | — | −0.0201 (1.2067) | — | — | fold0で大幅悪化。棄却 |
+
+baseline two-head: fold0 1.2742 / fold1 1.0427 / fold2 1.2268 / fold3 0.8936 / fold4 0.8871。fold3（eval-likeで悪化しやすいfold）の−0.0187が最大の好材料。
+
+- loc_full fold0 は全エポックでbaseline未達（ep1 1.407→ep7 1.310）。緯度経度事前情報は fold2 のval地点群にはたまたま効いたが、fold0 地点群では有害 — **CLAUDE.mdの「location直接特徴は危険」が実証された形**。eval地点（train と overlap 0）への転移はさらに期待できない
+- **BTD 5-fold 完走（2026-07-05）**。checkpoint + 9ch band stats + history を `models/swin_v2_temporal_two_head_btd_oof/` に集約済み（best_fold{0..4}.pth / band_stats_fold{0..4}.json）
+- **判断: loc_full は棄却。BTD は 3勝1敗1分（平均−0.0067）で採用候補**。fold1 は best ep2 で学習不安定な点に留意
+- 次: BTD 5-fold の OOF export → pooled / tile RMSE / eval-like weighted で two-head OOF と比較 → 良ければ推論カーネルで提出（kaggle_upload でモデルdataset化 → 推論 → blend）
 
 ### J. 「0.68の壁」discussion検証（2026-07-03、ibrahimqasmi氏の分析）
 
@@ -495,7 +514,7 @@ Nominatim geocoding（`data/location_coordinates_geocoded.csv` + `data/GEOCODING
 - **ドリズル切り捨て（投稿者推奨の0.1mm/hr）→ 我々には効果ほぼ無し**。5x5 OOF・5fold平均tile RMSE: 閾値なし0.596057 → 0.02で0.595594（−0.0005が最良）、0.1でほぼ中立、0.2以上で悪化。two-headのrain確率ゲートが既にドリズルを抑制済みのため
 - **rain確率ヘッドの推論時ゲート改変も枯れている**（fold2、`src/export_oof_rain_probs.py`で確率マップ再推論）: hard zero P<0.1が−0.0002で最良、sharpen/soften/binary maskはすべて中立〜悪化。**学習済みソフトゲートはほぼ最適**
 - **選別指標の改善: tile RMSE（コンペ指標=タイル別RMSE平均）を主指標に昇格**。fold2キャリブレーション5件でPearson +0.944（pooled +0.856）、Spearman同+0.9。スケールもLBと一致（OOF 0.533 vs LB 0.667）
-- 含意: 0.594への~0.07は後処理では取れず、**マスク質の向上=入力信号（BTD）・容量（Swin-S）・学習側の改善**が唯一の経路。tail重み付けは悪手（投稿者・我々のweighted_huber結果とも一致）、地点気候特徴は罠（気候平均0.798 < 全ゼロ0.746）
+- 含意: 0.594への~0.07は後処理では取れず、**マスク質の向上=学習側の改善**が唯一の経路。ただし候補だったBTD・loc_fullはfold0追試で転移せず（K2）、容量増Swin-Sもネガティブ確定。tail重み付けは悪手（投稿者・我々のweighted_huber結果とも一致）、地点気候特徴は罠（気候平均0.798 < 全ゼロ0.746）
 - aux確率マップ: `outputs/oof_predictions/swin_v2_temporal_two_head_oof_aux/oof_fold2.npz`（amount_log + P0.1/P1/P5）
 - 予備の小口: best zipへのドリズル閾値0.02適用（zip代数のみ、期待−0.0003前後、優先度低）
 

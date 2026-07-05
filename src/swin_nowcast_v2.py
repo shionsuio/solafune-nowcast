@@ -52,6 +52,49 @@ LEGACY_THREE_BANDS = {satellite: (1, 2, 3) for satellite in SATELLITES}
 # Brightness-temperature differences over matched6 channel indices:
 # split-window (clean IR - dirty IR), WV-IR (overshooting tops), upper-lower WV.
 BTD_PAIRS = ((4, 5), (2, 4), (2, 3))
+IR_WINDOW_INDEX = 4  # matched6 position of the ~10.4um IR window channel
+FLOW_GRID = 112
+
+
+def flow_divergence_channels(
+    ir_frames: np.ndarray, output_size: int
+) -> np.ndarray:
+    """Cloud-top divergence maps from Farneback optical flow between IR frames.
+
+    Divergence of the cloud-top wind field is a proxy for updraft strength
+    (storm-top outflow); returns one map per adjacent frame pair.
+    """
+    import cv2
+
+    def to_uint8(image: np.ndarray) -> np.ndarray:
+        lo, hi = np.percentile(image, [1, 99])
+        scaled = np.clip((image - lo) / max(hi - lo, 1e-6), 0, 1)
+        return (scaled * 255).astype(np.uint8)
+
+    small = [
+        cv2.resize(frame, (FLOW_GRID, FLOW_GRID), interpolation=cv2.INTER_AREA)
+        for frame in ir_frames
+    ]
+    maps = []
+    for earlier, later in zip(small[:-1], small[1:]):
+        flow = cv2.calcOpticalFlowFarneback(
+            to_uint8(earlier), to_uint8(later), None,
+            pyr_scale=0.5, levels=3, winsize=21,
+            iterations=3, poly_n=7, poly_sigma=1.5, flags=0,
+        )
+        divergence = np.gradient(flow[..., 0], axis=1) + np.gradient(
+            flow[..., 1], axis=0
+        )
+        divergence = cv2.GaussianBlur(divergence, (0, 0), sigmaX=3)
+        # bring channel scale in line with normalized bands (raw std ~0.04)
+        divergence *= 10.0
+        maps.append(
+            cv2.resize(
+                divergence, (output_size, output_size),
+                interpolation=cv2.INTER_LINEAR,
+            )
+        )
+    return np.stack(maps).astype(np.float32)
 
 
 def uses_btd(config: "Config") -> bool:
@@ -117,6 +160,7 @@ class Config:
     disable_local_time_features: bool = False
     disable_geo_season_features: bool = False
     band_mode: str = "matched6"
+    use_flow_divergence: bool = False
     encoder_name: str = "swin_tiny_patch4_window7_224"
     use_satellite_normalization: bool = True
     swin_model_subdir: str = "swin_v2"
@@ -556,6 +600,25 @@ class NowcastingDataset(Dataset):
                     observation_stack.std(axis=0),
                 ]
             )
+        if self.config.use_flow_divergence:
+            if len(files) == self.config.max_observations:
+                image_features.append(
+                    flow_divergence_channels(
+                        observation_stack[:, IR_WINDOW_INDEX],
+                        self.config.encoder_size,
+                    )
+                )
+            else:
+                image_features.append(
+                    np.zeros(
+                        (
+                            self.config.max_observations - 1,
+                            self.config.encoder_size,
+                            self.config.encoder_size,
+                        ),
+                        dtype=np.float32,
+                    )
+                )
         image = np.concatenate(image_features, axis=0)
 
         pseudo_index = int(row.get("pseudo_index", -1))
@@ -689,6 +752,8 @@ class SwinNowcaster(nn.Module):
             raw_channels += band_count * (config.max_observations - 1)
         if config.use_temporal_summary:
             raw_channels += band_count * 2
+        if config.use_flow_divergence:
+            raw_channels += config.max_observations - 1
         self.config = config
         self.stem = SatelliteStem(raw_channels, config.stem_channels)
         self.shared_stem = nn.Sequential(
