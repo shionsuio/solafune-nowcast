@@ -21,7 +21,13 @@ from pathlib import Path
 import pandas as pd
 
 from kaggle_setup import ensure_kaggle_workspace
-from swin_nowcast_v2 import Config, make_folds, prepare_metadata, train_fold
+from swin_nowcast_v2 import (
+    Config,
+    extend_temporal_context,
+    make_folds,
+    prepare_metadata,
+    train_fold,
+)
 
 
 def parse_folds(value: str) -> list[int]:
@@ -43,8 +49,10 @@ def run(args: argparse.Namespace) -> Path:
             if source.exists() and not destination.exists():
                 shutil.copy2(source, destination)
 
+    context_steps = int(getattr(args, "temporal_context_steps", 0))
     config = Config(
         root=str(root),
+        max_observations=3 * (1 + context_steps),
         batch_size=args.batch_size,
         epochs=args.epochs,
         lr_encoder=args.lr_encoder,
@@ -81,6 +89,8 @@ def run(args: argparse.Namespace) -> Path:
 
     train_csv = config.paths.train_dir / "train_dataset.csv"
     dataframe = prepare_metadata(train_csv)
+    if context_steps:
+        dataframe = extend_temporal_context(dataframe, context_steps)
     folds = make_folds(dataframe, config.n_folds)
 
     results = []
@@ -142,6 +152,7 @@ def main() -> None:
     parser.add_argument("--band-mode", default="matched6", choices=["legacy3", "matched6", "matched6_btd"])
     parser.add_argument("--encoder-name", default="swin_tiny_patch4_window7_224")
     parser.add_argument("--flow-divergence", action="store_true")
+    parser.add_argument("--temporal-context-steps", type=int, default=0)
     parser.add_argument("--pseudo-label-npz", default=None)
     parser.add_argument("--pseudo-label-csv", default=None)
     parser.add_argument("--pseudo-sample-weight", type=float, default=1.0)

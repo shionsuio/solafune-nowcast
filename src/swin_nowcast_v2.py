@@ -206,6 +206,37 @@ def prepare_metadata(path: Path) -> pd.DataFrame:
     return df
 
 
+def extend_temporal_context(dataframe: pd.DataFrame, extra_steps: int) -> pd.DataFrame:
+    """Prepend observation files from earlier rows of the same location chain.
+
+    Rows are 30 minutes apart per location, so the previous row's three frames
+    directly precede this row's frames. Chain starts are padded by repeating
+    the oldest available frame.
+    """
+    df = dataframe.copy()
+    lookup = {
+        (loc, ts): files
+        for loc, ts, files in zip(df["name_location"], df["datetime"], df["observation_files"])
+        if len(files) > 0
+    }
+    step = pd.Timedelta(minutes=30)
+    extended = []
+    for loc, ts, files in zip(df["name_location"], df["datetime"], df["observation_files"]):
+        if len(files) == 0:
+            extended.append(files)
+            continue
+        chunks = [list(files)]
+        for offset in range(1, extra_steps + 1):
+            previous = lookup.get((loc, ts - offset * step))
+            if previous and len(previous) == len(files):
+                chunks.insert(0, list(previous))
+            else:
+                chunks.insert(0, [chunks[0][0]] * len(files))
+        extended.append([name for chunk in chunks for name in chunk])
+    df["observation_files"] = extended
+    return df
+
+
 def time_features(timestamp: pd.Timestamp) -> np.ndarray:
     month_phase = 2 * math.pi * (timestamp.month - 1) / 12
     hour = timestamp.hour + timestamp.minute / 60
