@@ -34,6 +34,26 @@ def parse_folds(value: str) -> list[int]:
     return [int(part.strip()) for part in value.split(",") if part.strip()]
 
 
+def dihedral_transforms() -> list[tuple[int, bool]]:
+    return [(k, flip) for flip in (False, True) for k in range(4)]
+
+
+def apply_dihedral(image: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
+    if flip:
+        image = torch.flip(image, dims=[3])
+    if k:
+        image = torch.rot90(image, k, dims=[2, 3])
+    return image
+
+
+def invert_dihedral(image: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
+    if k:
+        image = torch.rot90(image, -k, dims=[2, 3])
+    if flip:
+        image = torch.flip(image, dims=[3])
+    return image
+
+
 def export_fold(
     config: Config,
     dataframe: pd.DataFrame,
@@ -41,6 +61,7 @@ def export_fold(
     output_dir: Path,
     save_target: bool,
     limit: int | None,
+    tta: bool = False,
 ) -> None:
     device = get_device()
     model, stats = load_fold_model(config, fold["fold"], device)
@@ -72,13 +93,24 @@ def export_fold(
         for image, satellite_id, temporal, missing, target, _ in tqdm(
             loader, desc=f"Export fold {fold['fold']}", leave=False
         ):
-            prediction_log = model(
-                image.to(device, non_blocking=True),
-                satellite_id.to(device, non_blocking=True),
-                temporal.to(device, non_blocking=True),
-                missing.to(device, non_blocking=True),
-            )
-            prediction = torch.expm1(prediction_log.float().cpu()).clamp(min=0)
+            image = image.to(device, non_blocking=True)
+            satellite_id = satellite_id.to(device, non_blocking=True)
+            temporal = temporal.to(device, non_blocking=True)
+            missing = missing.to(device, non_blocking=True)
+            if tta:
+                accumulated = None
+                for k, flip in dihedral_transforms():
+                    prediction_log = model(
+                        apply_dihedral(image, k, flip), satellite_id, temporal, missing
+                    )
+                    restored = torch.expm1(
+                        invert_dihedral(prediction_log, k, flip).float()
+                    ).clamp(min=0)
+                    accumulated = restored if accumulated is None else accumulated + restored
+                prediction = (accumulated / len(dihedral_transforms())).cpu()
+            else:
+                prediction_log = model(image, satellite_id, temporal, missing)
+                prediction = torch.expm1(prediction_log.float().cpu()).clamp(min=0)
             predictions.append(prediction[:, 0].numpy().astype(np.float16))
             if save_target:
                 target_mm = torch.expm1(target).clamp(min=0)
@@ -148,6 +180,7 @@ def run(args: argparse.Namespace) -> Path:
             output_dir,
             save_target=args.save_target,
             limit=args.limit,
+            tta=getattr(args, "tta", False),
         )
     return output_dir
 
@@ -166,6 +199,7 @@ def main() -> None:
     parser.add_argument("--use-two-head", action="store_true")
     parser.add_argument("--band-mode", default="matched6")
     parser.add_argument("--save-target", action="store_true")
+    parser.add_argument("--tta", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
     run(args)
