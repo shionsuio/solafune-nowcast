@@ -21,6 +21,7 @@ from swin_nowcast_v2 import (
     Config,
     NowcastingDataset,
     attach_location_metadata,
+    extend_temporal_context,
     get_device,
     load_fold_model,
     make_folds,
@@ -153,12 +154,14 @@ def run(args: argparse.Namespace) -> Path:
     if args.kaggle_input_root:
         ensure_kaggle_workspace(root, Path(args.kaggle_input_root))
 
+    context_steps = int(getattr(args, "temporal_context_steps", 0) or 0)
     model_dir = root / "models" / args.model_subdir
     config = Config(
         root=str(root),
         batch_size=args.batch_size,
         workers=args.workers,
         pretrained=False,
+        max_observations=3 * (1 + context_steps),
         use_two_head=args.use_two_head,
         use_temporal_differences=args.use_temporal_differences,
         use_temporal_summary=args.use_temporal_summary,
@@ -169,6 +172,8 @@ def run(args: argparse.Namespace) -> Path:
     )
 
     dataframe = prepare_metadata(config.paths.train_dir / "train_dataset.csv")
+    if context_steps:
+        dataframe = extend_temporal_context(dataframe, context_steps)
     folds = make_folds(dataframe, config.n_folds)
     output_dir = root / args.output_dir / args.model_subdir
 
@@ -200,6 +205,7 @@ def main() -> None:
     parser.add_argument("--band-mode", default="matched6")
     parser.add_argument("--save-target", action="store_true")
     parser.add_argument("--tta", action="store_true")
+    parser.add_argument("--temporal-context-steps", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
     run(args)
