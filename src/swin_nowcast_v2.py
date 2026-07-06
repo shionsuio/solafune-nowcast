@@ -1295,11 +1295,32 @@ def load_fold_model(
     return model, stats
 
 
+def dihedral_transforms() -> list[tuple[int, bool]]:
+    return [(k, flip) for flip in (False, True) for k in range(4)]
+
+
+def apply_dihedral(image: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
+    if flip:
+        image = torch.flip(image, dims=[3])
+    if k:
+        image = torch.rot90(image, k, dims=[2, 3])
+    return image
+
+
+def invert_dihedral(image: torch.Tensor, k: int, flip: bool) -> torch.Tensor:
+    if k:
+        image = torch.rot90(image, -k, dims=[2, 3])
+    if flip:
+        image = torch.flip(image, dims=[3])
+    return image
+
+
 def predict_fold(
     config: Config,
     dataframe: pd.DataFrame,
     fold: int,
     device: torch.device,
+    tta: bool = False,
 ) -> np.ndarray:
     model, stats = load_fold_model(config, fold, device)
     dataframe = attach_location_metadata(dataframe, config)
@@ -1317,13 +1338,24 @@ def predict_fold(
         for image, satellite_id, temporal, missing, _, _ in tqdm(
             loader, desc=f"Inference fold {fold}"
         ):
-            prediction = model(
-                image.to(device, non_blocking=True),
-                satellite_id.to(device, non_blocking=True),
-                temporal.to(device, non_blocking=True),
-                missing.to(device, non_blocking=True),
-            )
-            prediction = torch.expm1(prediction).clamp(min=0).cpu().numpy()
+            image = image.to(device, non_blocking=True)
+            satellite_id = satellite_id.to(device, non_blocking=True)
+            temporal = temporal.to(device, non_blocking=True)
+            missing = missing.to(device, non_blocking=True)
+            if tta:
+                accumulated = None
+                for k, flip in dihedral_transforms():
+                    prediction_log = model(
+                        apply_dihedral(image, k, flip), satellite_id, temporal, missing
+                    )
+                    restored = torch.expm1(
+                        invert_dihedral(prediction_log, k, flip).float()
+                    ).clamp(min=0)
+                    accumulated = restored if accumulated is None else accumulated + restored
+                prediction = (accumulated / len(dihedral_transforms())).cpu().numpy()
+            else:
+                prediction = model(image, satellite_id, temporal, missing)
+                prediction = torch.expm1(prediction).clamp(min=0).cpu().numpy()
             predictions.append(prediction[:, 0])
     return np.concatenate(predictions)
 
