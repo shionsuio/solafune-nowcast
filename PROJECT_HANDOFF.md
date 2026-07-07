@@ -45,7 +45,21 @@ EDA継続で発見: **eval 604行（2.1%）、train 890行がフレーム不足*
 - **zipパッチ**: cloudfix zip ベースに、H/G 558行へ `0.4×0.5×Δth`（5-fold平均）を加算。`outputs/framefix_deltas.npz` に差分保存
 - **LB: 0.6643951（−0.0000797、新best）** — cloudfixの10倍の効き
 - **再学習時の注意**: 学習データローダにも同じ整列+複製を入れて再学習すれば、btd/wh側も含めて上積み余地。ただし「ゼロパド前提の学習済みモデル×推論時fix」の非対称に注意（上記OOF結果参照）
-- align_files 実装は `outputs/framefix_deltas.npz` 生成スクリプト（/tmp/build_framefix_zip.py 相当）参照。要 src 化
+- align_files 実装は src 化済み: `swin_nowcast_v2.align_observation_frames`（commit 330bbea）。th側TTAカーネル（kaggle_push/swin_two_head_tta_predict）に配線済み。btd側は未適用（OOFで悪化のため）
+
+## ゼロ画素EDAの完全決着（2026-07-07、この次元はCLOSED）
+
+使用バンド（matched6）限定のゼロスキャン（20.7万ファイル）+ IRバンド限定再スキャンで、「ゼロ＝ゴミ」仮説を完全に切り分けた。
+
+- **夜間反射バンドゼロ（正常）**: matched6 の band 5,6（H/G, 1.6/2.2µm）と band 7,8（Meteosat）は反射バンドで夜間ゼロ。全ファイルの63%に及ぶが正常データ
+- **IR部分ゼロ（正常どころか最強シグナル）**: 値は量子化されていて最小非ゼロ=1、**0はスケール最下端＝最も冷たい雲頂**。IRゼロ領域のGPM降雨 7.8mm vs 非ゼロ 2.3mm（3.4倍）。heavy（IRゼロ>50%）はaceh/jamaica/hat_yai等の熱帯豪雨地点に集中
+- **fix検証（train 165行 OOF, th+btd）**: フレーム欠損扱い/ゼロ画素平均埋め/heavy限定の3案すべて **+1.5〜1.7 RMSE の大幅悪化**。IRゼロは絶対に触らない
+- 真のゴミは3種のみで全対処済み: ①全16chゼロ（clouded fix）②チャネル欠損（既存チェック）③フレーム欠損（framefix）
+- スキャン結果: `outputs/used_band_zero_scan.csv`, `outputs/ir_band_zero_scan.csv`, OOF: `outputs/irfix_oof_*.csv`
+
+### 全フレーム欠損行（保留、効果 ~5e-6 で見送り）
+
+eval 29行（Meteosat中心: lombardia 15等）、train 235行（france 191）が observation_files 空。現bestのzipは平均0.036mmのフラット予測。train真値priorは平均0.116mm（93%画素が0.1mm未満、tile-mean中央値0.014）。定数0.116に置換した場合の試算はLB −5e-6程度（cloudfixの半分）だが、trainがfrance支配で地点転移リスクあり。提出枠を使う価値なしと判断し見送り。ゼロ入力行のzip直接上書きは分解不要で簡単（コンポーネント再計算いらず）なので、余剰提出枠が出たら再検討可。
 
 ```text
 Himawari / GOES:
