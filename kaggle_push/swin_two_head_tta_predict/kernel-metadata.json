@@ -1,0 +1,14 @@
+{
+  "id": "suioshion/solafune-swin-two-head-tta-predict",
+  "title": "Solafune Swin Two Head Tta Predict",
+  "code_file": "run_swin_two_head_tta_predict.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "enable_internet": true,
+  "dataset_sources": [
+    "suioshion/solafune-dataset-v2",
+    "suioshion/swin-two-head-full-models"
+  ]
+}

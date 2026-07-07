@@ -17,6 +17,7 @@ import json
 import math
 import os
 import random
+import re
 import shutil
 import zipfile
 from dataclasses import asdict, dataclass
@@ -203,6 +204,44 @@ def prepare_metadata(path: Path) -> pd.DataFrame:
     df["datetime"] = pd.to_datetime(df["datetime"])
     df["observation_files"] = df["last_30_minutes_observation_filename"].map(ast.literal_eval)
     df["missing_observation"] = df["observation_files"].map(lambda values: len(values) == 0)
+    return df
+
+
+def align_observation_frames(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """Repair rows with 1-2 observation frames by timestamp-aligned slot placement.
+
+    Missing frames (mostly the latest t-10 slot) would otherwise be zero-padded
+    at the wrong temporal position, so temporal-difference channels see fake
+    motion. Instead each file is placed in its true slot (t-30/t-20/t-10) and
+    empty slots are filled with the nearest available frame (zero motion).
+    """
+    df = dataframe.copy()
+    aligned = []
+    for ts, files in zip(df["datetime"], df["observation_files"]):
+        if len(files) == 0 or len(files) >= 3:
+            aligned.append(files)
+            continue
+        expected = [(ts - pd.Timedelta(minutes=m)).strftime("%Y%m%d_%H%M") for m in (30, 20, 10)]
+        stamp_of = {}
+        for name in files:
+            match = re.search(r"(\d{8}_\d{4})", name)
+            if match is None:
+                stamp_of = None
+                break
+            stamp_of[match.group(1)] = name
+        if stamp_of is None or any(stamp not in expected for stamp in stamp_of):
+            aligned.append(files)
+            continue
+        slots = [stamp_of.get(stamp) for stamp in expected]
+        filled = []
+        for i, slot in enumerate(slots):
+            if slot is not None:
+                filled.append(slot)
+            else:
+                _, j = min((abs(j - i), j) for j, other in enumerate(slots) if other is not None)
+                filled.append(slots[j])
+        aligned.append(filled)
+    df["observation_files"] = aligned
     return df
 
 
