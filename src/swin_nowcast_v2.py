@@ -570,6 +570,17 @@ class NowcastingDataset(Dataset):
                     dtype=np.float32,
                 )
             data = src.read(bands).astype(np.float32)
+        if not data.any():
+            # fully clouded frame (all channels zero): raw zeros would normalize
+            # to -3..-4 sigma outliers, so treat like a missing frame instead
+            return np.zeros(
+                (
+                    input_channel_count(self.config, satellite),
+                    self.config.encoder_size,
+                    self.config.encoder_size,
+                ),
+                dtype=np.float32,
+            )
         if uses_btd(self.config):
             data = append_btd_channels(data)
         stats_key = satellite if self.config.use_satellite_normalization else "shared"
