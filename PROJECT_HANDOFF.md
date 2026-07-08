@@ -45,6 +45,7 @@ EDA継続で発見: **eval 604行（2.1%）、train 890行がフレーム不足*
 - **zipパッチ**: cloudfix zip ベースに、H/G 558行へ `0.4×0.5×Δth`（5-fold平均）を加算。`outputs/framefix_deltas.npz` に差分保存
 - **LB: 0.6643951（−0.0000797、新best）** — cloudfixの10倍の効き
 - **再学習時の注意**: 学習データローダにも同じ整列+複製を入れて再学習すれば、btd/wh側も含めて上積み余地。ただし「ゼロパド前提の学習済みモデル×推論時fix」の非対称に注意（上記OOF結果参照）
+- **再学習フラグ実装済み（c7bf891）**: `run_swin_temporal_full.py --align-frames --exclude-bad-labels`。前者はフレーム欠損655行を整列+複製、後者は2023-01-01 00:00の不正ラベル5行をfoldから除外（fold構成は不変）。cloudedフレーム→欠損扱いはデータセット側で常時有効。GPU復活後はこの2フラグを既存コマンドに足すだけ
 - align_files 実装は src 化済み: `swin_nowcast_v2.align_observation_frames`（commit 330bbea）。th側TTAカーネル（kaggle_push/swin_two_head_tta_predict）に配線済み。btd側は未適用（OOFで悪化のため）
 
 ## ゼロ画素EDAの完全決着（2026-07-07、この次元はCLOSED）
