@@ -18,16 +18,21 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from kaggle_setup import ensure_kaggle_workspace
 from swin_nowcast_v2 import (
     Config,
+    align_observation_frames,
     extend_temporal_context,
     make_folds,
     prepare_metadata,
     train_fold,
 )
+
+# 2023-01-01 00:00 GPM tiles for these locations are corrupted duplicates
+BAD_LABEL_LOCATIONS = ("aceh", "bihar", "dhaka", "guangdong", "jakarta")
 
 
 def parse_folds(value: str) -> list[int]:
@@ -89,9 +94,24 @@ def run(args: argparse.Namespace) -> Path:
 
     train_csv = config.paths.train_dir / "train_dataset.csv"
     dataframe = prepare_metadata(train_csv)
+    if args.align_frames:
+        before = dataframe["observation_files"].map(len)
+        dataframe = align_observation_frames(dataframe)
+        repaired = int(((before > 0) & (before < 3)).sum())
+        print(f"align-frames: repaired {repaired} frame-deficient rows")
     if context_steps:
         dataframe = extend_temporal_context(dataframe, context_steps)
     folds = make_folds(dataframe, config.n_folds)
+    if args.exclude_bad_labels:
+        bad_mask = (
+            (dataframe["datetime"] == pd.Timestamp("2023-01-01 00:00:00"))
+            & dataframe["name_location"].isin(BAD_LABEL_LOCATIONS)
+        ).to_numpy()
+        bad_positions = np.flatnonzero(bad_mask)
+        for fold in folds:
+            fold["train_indices"] = np.setdiff1d(fold["train_indices"], bad_positions)
+            fold["validation_indices"] = np.setdiff1d(fold["validation_indices"], bad_positions)
+        print(f"exclude-bad-labels: dropped {len(bad_positions)} rows from folds")
 
     results = []
     for fold_index in parse_folds(args.folds):
@@ -156,6 +176,8 @@ def main() -> None:
     parser.add_argument("--pseudo-label-npz", default=None)
     parser.add_argument("--pseudo-label-csv", default=None)
     parser.add_argument("--pseudo-sample-weight", type=float, default=1.0)
+    parser.add_argument("--align-frames", action="store_true")
+    parser.add_argument("--exclude-bad-labels", action="store_true")
     parser.add_argument("--no-pretrained", action="store_true")
     parser.add_argument("--no-amp", action="store_true")
     args = parser.parse_args()
