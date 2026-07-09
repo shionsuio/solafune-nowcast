@@ -94,7 +94,7 @@ def run(args: argparse.Namespace) -> Path:
 
     train_csv = config.paths.train_dir / "train_dataset.csv"
     dataframe = prepare_metadata(train_csv)
-    if args.align_frames:
+    if getattr(args, "align_frames", False):
         before = dataframe["observation_files"].map(len)
         dataframe = align_observation_frames(dataframe)
         repaired = int(((before > 0) & (before < 3)).sum())
@@ -102,7 +102,7 @@ def run(args: argparse.Namespace) -> Path:
     if context_steps:
         dataframe = extend_temporal_context(dataframe, context_steps)
     folds = make_folds(dataframe, config.n_folds)
-    if args.exclude_bad_labels:
+    if getattr(args, "exclude_bad_labels", False):
         bad_mask = (
             (dataframe["datetime"] == pd.Timestamp("2023-01-01 00:00:00"))
             & dataframe["name_location"].isin(BAD_LABEL_LOCATIONS)

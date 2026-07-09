@@ -192,6 +192,10 @@ def seed_everything(seed: int) -> None:
 
 
 def get_device() -> torch.device:
+    if os.environ.get("SOLAFUNE_DEVICE") == "xla":
+        import torch_xla.core.xla_model as xm
+
+        return xm.xla_device()
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
@@ -1000,9 +1004,9 @@ def make_loader(
         dataset,
         batch_size=config.batch_size,
         shuffle=shuffle,
-        num_workers=config.workers if device.type == "cuda" else 0,
+        num_workers=config.workers if device.type in ("cuda", "xla") else 0,
         pin_memory=device.type == "cuda",
-        persistent_workers=config.workers > 0 and device.type == "cuda",
+        persistent_workers=config.workers > 0 and device.type in ("cuda", "xla"),
     )
 
 
@@ -1194,8 +1198,10 @@ def train_fold(
         optimizer, T_max=config.epochs
     )
     criterion = make_training_loss(config)
-    amp_enabled = config.use_amp and device.type == "cuda"
-    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+    amp_enabled = config.use_amp and device.type in ("cuda", "xla")
+    # bf16 on TPU needs no gradient scaling; fp16 on CUDA does
+    amp_dtype = torch.bfloat16 if device.type == "xla" else torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled and device.type == "cuda")
 
     checkpoint_path = config.model_dir / f"best_fold{fold['fold']}.pth"
     history = []
@@ -1219,7 +1225,7 @@ def train_fold(
             optimizer.zero_grad(set_to_none=True)
             with torch.autocast(
                 device_type=device.type,
-                dtype=torch.float16,
+                dtype=amp_dtype,
                 enabled=amp_enabled,
             ):
                 if config.use_two_head:
@@ -1297,7 +1303,11 @@ def train_fold(
                     "fold": fold["fold"],
                     "validation_locations": fold["validation_locations"],
                     "validation_rmse": validation_rmse,
-                    "model_state_dict": model.state_dict(),
+                    # move to CPU so checkpoints load anywhere (XLA tensors
+                    # cannot be deserialized without torch_xla installed)
+                    "model_state_dict": {
+                        key: value.cpu() for key, value in model.state_dict().items()
+                    },
                 },
                 checkpoint_path,
             )
