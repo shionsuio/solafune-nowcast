@@ -44,9 +44,20 @@ def install_torch_xla() -> None:
         )
 
 
+def install_runtime_deps() -> None:
+    for module, package in (("rasterio", "rasterio"), ("timm", "timm")):
+        try:
+            __import__(module)
+        except ImportError:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", package], check=True
+            )
+
+
 def main() -> None:
     os.environ.setdefault("PJRT_DEVICE", "TPU")
     install_torch_xla()
+    install_runtime_deps()
 
     repo = Path("/kaggle/working/solafune-nowcast")
     if repo.exists():
