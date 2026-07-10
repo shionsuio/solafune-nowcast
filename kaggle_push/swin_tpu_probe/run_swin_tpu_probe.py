@@ -110,7 +110,7 @@ def main() -> None:
         use_temporal_differences=True,
         use_temporal_summary=True,
         band_mode="matched6",
-        use_amp=True,  # bf16 autocast on XLA
+        use_amp=False,  # fp32: matches the GPU recipe (no_amp) and avoids XLA autocast dtype issues
         swin_model_subdir="swin_tpu_probe",
         band_stats_root=str(stats_dataset) if stats_dataset.exists() else None,
     )
