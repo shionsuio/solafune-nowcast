@@ -98,6 +98,71 @@ def flow_divergence_channels(
     return np.stack(maps).astype(np.float32)
 
 
+def flow_extrapolated_channels(observation_stack: np.ndarray) -> np.ndarray:
+    """Advect the latest multiband frame one timestep using IR optical flow.
+
+    The observation frames end ten minutes before the target timestamp.  This
+    creates a physically motivated estimate at the target time, while leaving
+    the network free to ignore it when advection is not a useful assumption.
+    """
+    import cv2
+
+    def to_uint8(image: np.ndarray) -> np.ndarray:
+        lo, hi = np.percentile(image, [1, 99])
+        scaled = np.clip((image - lo) / max(hi - lo, 1e-6), 0, 1)
+        return (scaled * 255).astype(np.uint8)
+
+    ir_frames = [
+        cv2.resize(
+            frame[IR_WINDOW_INDEX], (FLOW_GRID, FLOW_GRID), interpolation=cv2.INTER_AREA
+        )
+        for frame in observation_stack
+    ]
+    flows = []
+    for earlier, later in zip(ir_frames[:-1], ir_frames[1:]):
+        flows.append(
+            cv2.calcOpticalFlowFarneback(
+                to_uint8(earlier),
+                to_uint8(later),
+                None,
+                pyr_scale=0.5,
+                levels=3,
+                winsize=21,
+                iterations=3,
+                poly_n=7,
+                poly_sigma=1.5,
+                flags=0,
+            )
+        )
+    flow = np.mean(flows, axis=0)
+    grid_y, grid_x = np.mgrid[:FLOW_GRID, :FLOW_GRID].astype(np.float32)
+    # Farneback maps a source pixel from t-20 to t-10.  remap needs the source
+    # coordinate for each destination pixel, hence the inverse-flow approximation.
+    map_x = grid_x - flow[..., 0]
+    map_y = grid_y - flow[..., 1]
+
+    extrapolated = []
+    for channel in observation_stack[-1]:
+        small = cv2.resize(
+            channel, (FLOW_GRID, FLOW_GRID), interpolation=cv2.INTER_AREA
+        )
+        advanced = cv2.remap(
+            small,
+            map_x,
+            map_y,
+            interpolation=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        extrapolated.append(
+            cv2.resize(
+                advanced,
+                (channel.shape[1], channel.shape[0]),
+                interpolation=cv2.INTER_LINEAR,
+            )
+        )
+    return np.stack(extrapolated).astype(np.float32)
+
+
 def uses_btd(config: "Config") -> bool:
     return config.band_mode == "matched6_btd"
 
@@ -162,6 +227,7 @@ class Config:
     disable_geo_season_features: bool = False
     band_mode: str = "matched6"
     use_flow_divergence: bool = False
+    use_flow_extrapolation: bool = False
     encoder_name: str = "swin_tiny_patch4_window7_224"
     use_satellite_normalization: bool = True
     swin_model_subdir: str = "swin_v2"
@@ -704,6 +770,21 @@ class NowcastingDataset(Dataset):
                         dtype=np.float32,
                     )
                 )
+        if self.config.use_flow_extrapolation:
+            valid_frames = np.any(observation_stack != 0, axis=(1, 2, 3))
+            if len(files) == self.config.max_observations and valid_frames.all():
+                image_features.append(flow_extrapolated_channels(observation_stack))
+            else:
+                image_features.append(
+                    np.zeros(
+                        (
+                            input_channel_count(self.config, satellite),
+                            self.config.encoder_size,
+                            self.config.encoder_size,
+                        ),
+                        dtype=np.float32,
+                    )
+                )
         image = np.concatenate(image_features, axis=0)
 
         pseudo_index = int(row.get("pseudo_index", -1))
@@ -839,6 +920,8 @@ class SwinNowcaster(nn.Module):
             raw_channels += band_count * 2
         if config.use_flow_divergence:
             raw_channels += config.max_observations - 1
+        if config.use_flow_extrapolation:
+            raw_channels += band_count
         self.config = config
         self.stem = SatelliteStem(raw_channels, config.stem_channels)
         self.shared_stem = nn.Sequential(
@@ -1202,6 +1285,14 @@ def train_fold(
     # bf16 on TPU needs no gradient scaling; fp16 on CUDA does
     amp_dtype = torch.bfloat16 if device.type == "xla" else torch.float16
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled and device.type == "cuda")
+    if device.type == "xla":
+        # without a per-step barrier the XLA lazy graph grows across steps
+        # (recompiles every step, then host OOM)
+        import torch_xla.core.xla_model as xm
+
+        mark_step = xm.mark_step
+    else:
+        mark_step = lambda: None
 
     checkpoint_path = config.model_dir / f"best_fold{fold['fold']}.pth"
     history = []
@@ -1247,16 +1338,18 @@ def train_fold(
                     rain_logits,
                     sample_weight=sample_weight,
                 )
-            if not torch.isfinite(loss):
-                raise FloatingPointError(
-                    f"Non-finite training loss at fold={fold['fold']} epoch={epoch}"
-                )
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
-            loss_sum += loss.item() * image.shape[0]
+            mark_step()
+            loss_value = loss.item()
+            if not math.isfinite(loss_value):
+                raise FloatingPointError(
+                    f"Non-finite training loss at fold={fold['fold']} epoch={epoch}"
+                )
+            loss_sum += loss_value * image.shape[0]
             sample_count += image.shape[0]
 
         model.eval()
