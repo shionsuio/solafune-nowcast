@@ -1,7 +1,7 @@
 {
-  "id": "suioshion/solafune-swin-th-tta-predict2",
-  "title": "Solafune Swin TH TTA Predict2",
-  "code_file": "run_swin_two_head_tta_predict.py",
+  "id": "suioshion/solafune-swin-th-clean-fold3",
+  "title": "Solafune Swin TH Clean Fold3",
+  "code_file": "run_swin_th_clean_fold3.py",
   "language": "python",
   "kernel_type": "script",
   "is_private": true,
@@ -10,6 +10,6 @@
   "enable_internet": true,
   "dataset_sources": [
     "suioshion/solafune-dataset-v2",
-    "suioshion/swin-two-head-full-models"
+    "suioshion/solafune-stat"
   ]
 }

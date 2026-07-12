@@ -1,6 +1,6 @@
 {
-  "id": "suioshion/solafune-swin-btd-tta-predict",
-  "title": "Solafune Swin Btd Tta Predict",
+  "id": "suioshion/solafune-swin-btd-tta-predict2",
+  "title": "Solafune Swin BTD TTA Predict2",
   "code_file": "run_swin_btd_tta_predict.py",
   "language": "python",
   "kernel_type": "script",
@@ -10,5 +10,6 @@
   "dataset_sources": [
     "suioshion/solafune-dataset-v2",
     "suioshion/swin-btd-two-head-models"
-  ]
+  ],
+  "enable_tpu": false
 }
