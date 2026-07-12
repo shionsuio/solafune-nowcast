@@ -72,6 +72,24 @@ Meteosat:
 
 Meteosat に two-head を入れると悪化する可能性が高い。現時点では Meteosat は base 維持。
 
+## TPU移植の検証（2026-07-10〜13、撤退確定 CLOSED）
+
+GPU quota切れの間に20h TPU quotaでクリーン再学習できないか、実コードパス（train_fold）のサブサンプルprobeで検証した（`kaggle_push/swin_tpu_probe/`）。
+
+- 移植内容はsrc化済み（環境変数 `SOLAFUNE_DEVICE=xla` で有効化、CUDAには無影響）: get_deviceのxla分岐、loaderワーカー有効化、fp32固定（XLA bf16 autocastはbackwardでdtype不整合）、per-step `xm.mark_step()`（無いとlazyグラフが成長し 111s→823s/step でOOM Kill）、checkpoint保存時のCPU移動
+- **結果: mark_step修正後も平均 ~18s/step（T4は~1.5s/step）**。速いステップでも3s台で、rasterio I/OストールとXLAリコンパイル揺れが混在。フルfold 1エポック≈20hで完全に不採算。さらに学習エポック完了直後に検証ループでホストOOM Kill
+- **結論: このワークロード（rasterio重I/O + 可変な補助loss）はKaggle TPUに向かない。TPUは今後使わない。** probeでTPU quota ~4h消費
+
+## OOF誤差分解（2026-07-10、重要）
+
+two_head 5fold OOF × GPM真値の全画素分解（`outputs/error_decomposition/`、スクリプトは /tmp だが再現容易）:
+
+- **真値>2mmの画素は全体の4.1%だが二乗誤差の80%を占める**。条件付き過小予測が強烈: 真値10-20mm帯 bias −8.3（≈5しか出せない）、>20mm帯は真値27に対し≈5
+- 衛星別SEシェア: himawari 52% / goes 30% / meteosat 19%。熱帯豪雨地点（aceh, central_vietnam, hat_yai, central_philippines）で~47%
+- **pred-binスケーリング再検証**: location-disjoint（4fold当てはめ→held-out）で pooled −0.0155 に見えるが、**tile RMSE（LB相関+0.944）では +0.0025 悪化**、地点別10勝10敗（ecuador +0.042）。「recalibration不転移」の結論はfold横断fitでも変わらず。**後処理次元は完全CLOSED**
+- fold2でのモデル比較: btdが2-5/5-10mm帯最良。weighted_huberは軽雨を犠牲にheavy biasを僅かに改善してtile悪化。**>10mm帯は全モデル横並びで識別不能**
+- 含意: 勝ち筋は「豪雨セルの識別力」で、後処理・loss重みでは取れない。構造レバー（解像度↑/エンコーダ容量↑/時間文脈拡張）、特にHimawari熱帯地点に効くものを優先
+
 ## CV-LB相関検証（2026-07-02、重要）
 
 eval-like CVがLB順位を予測できるかを、OOFで正確に再現できる提出5件（fold2キャリブレーションファミリー）で検証した。
@@ -168,6 +186,37 @@ HG15 → HG20: -0.000053
 ### Swin temporal
 
 本線。`submission_swin80_temporal20.zip` が長く Public best だった。
+
+### Optical-flow divergence（CLOSED）
+
+IR窓チャネルのFarneback optical flowから、隣接フレームごとの発散を2チャネル追加した
+two-head fold2（8 epoch）は `1.230453`。同設定の通常two-head fold2
+`1.226829` に対して **+0.003624 RMSE悪化**した。発散は雲頂の発達量に偏り、
+雨域の移流位置を直接表せないためと考える。単純な発散特徴は再実験しない。
+
+次候補は、同じIR flowで最新フレームをラベル時刻へ移流外挿して入力する表現。
+これは発散特徴とは別仮説として fold2 で検証する。
+
+- 実験パッケージ: `kaggle_push/swin_flow_warp_fold2/`（two-head fold2、8 epoch、
+  `--flow-extrapolation` のみを追加。コードを同梱しておりremote Gitには依存しない）
+- 2026-07-10に `kaggle kernels push -p kaggle_push/swin_flow_warp_fold2` を試行したが、
+  weekly GPU quota 45h到達により送信拒否。枠回復後に同コマンドで実行する。
+
+### 雲ライフサイクルEDA（2026-07-10）
+
+「発達・成熟・衰弱」を直接モデル化できるかを、3フレームが揃う行から検証。
+`src/analyze_cloud_lifecycle.py` がIR optical flowで t-20 を t-10 に移動補正し、
+移流と混ざらないIR変化・冷たい雲域の増減・BTD変化をGPMと比較する。
+
+- 均衡15,000行（各衛星5,000）の結果: 現時刻の冷たさ/冷雲域面積が最強
+  （pooled tile-mean相関: `ir_last_mean=-0.65`, `cold_fraction=+0.66`）
+- ただし冷雲域面積を衛星内で統制した後のライフサイクル指標は弱く、衛星ごとに逆方向。
+  flow magnitudeは GOES `-0.185`, Himawari `+0.135`, Meteosat `-0.064`。
+  Meteosatではcold-area増加 `+0.100`、GOESでは移動量/変化量が弱い負相関。
+- 結論: 「発達なら一律に降水を増やす」単一ルールは支持されない。衛星・降水レジーム別の
+  gateが必要で、現段階の単純なflow/発達後処理は採用しない。物理特徴は後処理ではなく
+  衛星別モデル入力として検証する。
+- 出力: `outputs/lifecycle_eda_15k/`（主要CSVと `lifecycle_overview.png`）。
 
 ### U-Net
 
@@ -665,4 +714,3 @@ cp outputs/adversarial_diagnostics/adversarial_scores.csv kaggle_upload/solafune
 ```
 
 `kaggle_upload/solafune_adversarial_scores/dataset-metadata.json` は作成済み。
-
