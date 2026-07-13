@@ -77,6 +77,7 @@ def run(args: argparse.Namespace) -> Path:
         use_amp=not args.no_amp,
         use_temporal_differences=True,
         use_temporal_summary=True,
+        use_temporal_frame_attention=getattr(args, "temporal_frame_attention", False),
         use_location_features=args.use_location_features,
         location_metadata_path=args.location_metadata_path,
         location_feature_mode=args.location_feature_mode,
@@ -175,6 +176,7 @@ def main() -> None:
     parser.add_argument("--flow-divergence", action="store_true")
     parser.add_argument("--flow-extrapolation", action="store_true")
     parser.add_argument("--temporal-context-steps", type=int, default=0)
+    parser.add_argument("--temporal-frame-attention", action="store_true")
     parser.add_argument("--pseudo-label-npz", default=None)
     parser.add_argument("--pseudo-label-csv", default=None)
     parser.add_argument("--pseudo-sample-weight", type=float, default=1.0)

@@ -214,6 +214,7 @@ class Config:
     use_missing_flag: bool = True
     use_temporal_differences: bool = False
     use_temporal_summary: bool = False
+    use_temporal_frame_attention: bool = False
     use_location_features: bool = False
     location_metadata_path: str | None = None
     location_feature_mode: str = "full"
@@ -928,6 +929,9 @@ class SwinNowcaster(nn.Module):
         if config.use_flow_extrapolation:
             raw_channels += band_count
         self.config = config
+        self.band_count = band_count
+        self.frame_channel_count = band_count * config.max_observations
+        self.auxiliary_channel_count = raw_channels - self.frame_channel_count
         self.stem = SatelliteStem(raw_channels, config.stem_channels)
         self.shared_stem = nn.Sequential(
             nn.Conv2d(raw_channels, config.stem_channels, 3, padding=1, bias=False),
@@ -943,6 +947,57 @@ class SwinNowcaster(nn.Module):
             nn.BatchNorm2d(config.stem_channels),
             nn.GELU(),
         )
+        if config.use_temporal_frame_attention:
+            self.frame_stem = SatelliteStem(band_count, config.stem_channels)
+            self.shared_frame_stem = nn.Sequential(
+                nn.Conv2d(band_count, config.stem_channels, 3, padding=1, bias=False),
+                nn.BatchNorm2d(config.stem_channels),
+                nn.GELU(),
+                nn.Conv2d(
+                    config.stem_channels,
+                    config.stem_channels,
+                    3,
+                    padding=1,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(config.stem_channels),
+                nn.GELU(),
+            )
+            if self.auxiliary_channel_count:
+                self.auxiliary_stem = SatelliteStem(
+                    self.auxiliary_channel_count, config.stem_channels
+                )
+                self.shared_auxiliary_stem = nn.Sequential(
+                    nn.Conv2d(
+                        self.auxiliary_channel_count,
+                        config.stem_channels,
+                        3,
+                        padding=1,
+                        bias=False,
+                    ),
+                    nn.BatchNorm2d(config.stem_channels),
+                    nn.GELU(),
+                    nn.Conv2d(
+                        config.stem_channels,
+                        config.stem_channels,
+                        3,
+                        padding=1,
+                        bias=False,
+                    ),
+                    nn.BatchNorm2d(config.stem_channels),
+                    nn.GELU(),
+                )
+            else:
+                self.auxiliary_stem = None
+                self.shared_auxiliary_stem = None
+            self.temporal_attention = nn.Sequential(
+                nn.Conv2d(config.stem_channels, config.stem_channels // 2, 1),
+                nn.GELU(),
+                nn.Conv2d(config.stem_channels // 2, 1, 1),
+            )
+            self.temporal_position_bias = nn.Parameter(
+                torch.zeros(config.max_observations)
+            )
         self.encoder = timm.create_model(
             config.encoder_name,
             pretrained=config.pretrained,
@@ -977,7 +1032,60 @@ class SwinNowcaster(nn.Module):
         missing_flag: torch.Tensor,
         return_aux: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        if self.config.use_satellite_stem:
+        if self.config.use_temporal_frame_attention:
+            stacked_input = image
+            batch_size, _, height, width = image.shape
+            frames = stacked_input[:, : self.frame_channel_count].reshape(
+                batch_size,
+                self.config.max_observations,
+                self.band_count,
+                height,
+                width,
+            )
+            flattened_frames = frames.reshape(
+                batch_size * self.config.max_observations,
+                self.band_count,
+                height,
+                width,
+            )
+            repeated_satellite_id = satellite_id.repeat_interleave(
+                self.config.max_observations
+            )
+            if self.config.use_satellite_stem:
+                encoded_frames = self.frame_stem(flattened_frames, repeated_satellite_id)
+            else:
+                encoded_frames = self.shared_frame_stem(flattened_frames)
+            encoded_frames = encoded_frames.reshape(
+                batch_size,
+                self.config.max_observations,
+                self.config.stem_channels,
+                height,
+                width,
+            )
+            attention_logits = self.temporal_attention(
+                encoded_frames.reshape(
+                    batch_size * self.config.max_observations,
+                    self.config.stem_channels,
+                    height,
+                    width,
+                )
+            ).reshape(batch_size, self.config.max_observations, 1, height, width)
+            attention_logits = attention_logits + self.temporal_position_bias[
+                None, :, None, None, None
+            ]
+            valid_frames = frames.abs().sum(dim=(2, 3, 4), keepdim=True) > 0
+            attention_logits = attention_logits.masked_fill(~valid_frames, -1e4)
+            attention = torch.softmax(attention_logits, dim=1)
+            image = (encoded_frames * attention).sum(dim=1)
+            if self.auxiliary_channel_count:
+                auxiliary = stacked_input[:, self.frame_channel_count :]
+                if self.config.use_satellite_stem:
+                    auxiliary = self.auxiliary_stem(auxiliary, satellite_id)
+                else:
+                    auxiliary = self.shared_auxiliary_stem(auxiliary)
+                image = image + auxiliary
+            image = image * valid_frames.any(dim=1).to(image.dtype)
+        elif self.config.use_satellite_stem:
             image = self.stem(image, satellite_id)
         else:
             image = self.shared_stem(image)
