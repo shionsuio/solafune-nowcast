@@ -583,6 +583,11 @@ def compute_band_stats(
                     if src.count < max(bands):
                         continue
                     data = src.read(bands).astype(np.float64)
+                # Keep statistics consistent with _read_observation: an
+                # all-zero frame is a fully-clouded/missing observation, not
+                # a valid low-valued satellite sample.
+                if not data.any():
+                    continue
                 if append_btd:
                     data = append_btd_channels(data)
                 flat = data.reshape(data.shape[0], -1)
