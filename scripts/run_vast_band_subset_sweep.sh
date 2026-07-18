@@ -28,7 +28,7 @@ COMMON=(
 
 for mode in full14_btd vis13_btd ir12_btd core10_btd; do
   echo "=== START $mode ==="
-  python src/run_swin_temporal_full.py \
+  python3 src/run_swin_temporal_full.py \
     "${COMMON[@]}" \
     --band-mode "$mode" \
     --model-subdir "swin_twohead_eval_aligned_${mode}_f0"
