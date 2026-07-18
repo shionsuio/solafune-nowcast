@@ -61,6 +61,30 @@ FULL16_BTD_PAIRS = {
     "goes": ((12, 14), (7, 12), (7, 9)),
     "meteosat": ((13, 14), (7, 13), (7, 9)),
 }
+# Fast raw-channel subset candidates for the 16-band ablation sweep. The
+# subsets stay in raw channel order so their effect can be compared directly.
+FULL14_BANDS = {
+    satellite: tuple(channel for channel in range(1, 17) if channel not in (2, 16))
+    for satellite in SATELLITES
+}
+VIS13_BANDS = {
+    satellite: (1, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15)
+    for satellite in SATELLITES
+}
+IR12_BANDS = {
+    satellite: (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+    for satellite in SATELLITES
+}
+CORE10_BANDS = {
+    satellite: (5, 6, 7, 8, 9, 10, 12, 13, 14, 15)
+    for satellite in SATELLITES
+}
+SUBSET_BANDS = {
+    "full14_btd": FULL14_BANDS,
+    "vis13_btd": VIS13_BANDS,
+    "ir12_btd": IR12_BANDS,
+    "core10_btd": CORE10_BANDS,
+}
 IR_WINDOW_INDEX = 4  # matched6 position of the ~10.4um IR window channel
 FLOW_GRID = 112
 
@@ -172,12 +196,17 @@ def flow_extrapolated_channels(observation_stack: np.ndarray) -> np.ndarray:
 
 
 def uses_btd(config: "Config") -> bool:
-    return config.band_mode in ("matched6_btd", "full16_btd")
+    return config.band_mode in ("matched6_btd", "full16_btd", *SUBSET_BANDS)
 
 
 def btd_pairs_for(config: "Config", satellite: str) -> tuple[tuple[int, int], ...]:
     if config.band_mode == "full16_btd":
         return FULL16_BTD_PAIRS[satellite]
+    if config.band_mode in SUBSET_BANDS:
+        selected = get_band_mapping(config)[satellite]
+        position = {raw_band: index for index, raw_band in enumerate(selected)}
+        raw_pairs = FULL16_BTD_PAIRS[satellite]
+        return tuple((position[left], position[right]) for left, right in raw_pairs)
     return BTD_PAIRS
 
 
@@ -562,6 +591,8 @@ def get_band_mapping(config: Config) -> dict[str, tuple[int, ...]]:
         return SATELLITE_BANDS
     if config.band_mode in ("full16", "full16_btd"):
         return FULL16_BANDS
+    if config.band_mode in SUBSET_BANDS:
+        return SUBSET_BANDS[config.band_mode]
     raise ValueError(f"Unknown band_mode: {config.band_mode}")
 
 

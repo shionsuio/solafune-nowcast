@@ -210,7 +210,17 @@ def main() -> None:
     parser.add_argument(
         "--band-mode",
         default="matched6",
-        choices=["legacy3", "matched6", "matched6_btd", "full16", "full16_btd"],
+        choices=[
+            "legacy3",
+            "matched6",
+            "matched6_btd",
+            "full16",
+            "full16_btd",
+            "full14_btd",
+            "vis13_btd",
+            "ir12_btd",
+            "core10_btd",
+        ],
     )
     parser.add_argument("--encoder-name", default="swin_tiny_patch4_window7_224")
     parser.add_argument("--flow-divergence", action="store_true")
