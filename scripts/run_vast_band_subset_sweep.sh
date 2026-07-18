@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT=/workspace/solafune
+PYTHON=/venv/main/bin/python
 COMMON=(
   --root "$ROOT"
   --folds 0
@@ -28,7 +29,7 @@ COMMON=(
 
 for mode in full14_btd vis13_btd ir12_btd core10_btd; do
   echo "=== START $mode ==="
-  python3 src/run_swin_temporal_full.py \
+  "$PYTHON" src/run_swin_temporal_full.py \
     "${COMMON[@]}" \
     --band-mode "$mode" \
     --model-subdir "swin_twohead_eval_aligned_${mode}_f0"
