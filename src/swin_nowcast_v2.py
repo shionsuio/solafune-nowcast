@@ -48,11 +48,19 @@ SATELLITE_BANDS = {
     "goes": (5, 6, 8, 10, 13, 15),
     "meteosat": (7, 8, 10, 11, 14, 15),
 }
+FULL16_BANDS = {satellite: tuple(range(1, 17)) for satellite in SATELLITES}
 LEGACY_THREE_BANDS = {satellite: (1, 2, 3) for satellite in SATELLITES}
 
 # Brightness-temperature differences over matched6 channel indices:
 # split-window (clean IR - dirty IR), WV-IR (overshooting tops), upper-lower WV.
 BTD_PAIRS = ((4, 5), (2, 4), (2, 3))
+# The same physical differences as BTD_PAIRS, expressed in raw 16-band
+# channel indices for each sensor-specific band ordering.
+FULL16_BTD_PAIRS = {
+    "himawari": ((12, 14), (7, 12), (7, 9)),
+    "goes": ((12, 14), (7, 12), (7, 9)),
+    "meteosat": ((13, 14), (7, 13), (7, 9)),
+}
 IR_WINDOW_INDEX = 4  # matched6 position of the ~10.4um IR window channel
 FLOW_GRID = 112
 
@@ -164,18 +172,26 @@ def flow_extrapolated_channels(observation_stack: np.ndarray) -> np.ndarray:
 
 
 def uses_btd(config: "Config") -> bool:
-    return config.band_mode == "matched6_btd"
+    return config.band_mode in ("matched6_btd", "full16_btd")
 
 
-def append_btd_channels(data: np.ndarray) -> np.ndarray:
-    btd = np.stack([data[i] - data[j] for i, j in BTD_PAIRS])
+def btd_pairs_for(config: "Config", satellite: str) -> tuple[tuple[int, int], ...]:
+    if config.band_mode == "full16_btd":
+        return FULL16_BTD_PAIRS[satellite]
+    return BTD_PAIRS
+
+
+def append_btd_channels(
+    data: np.ndarray, pairs: tuple[tuple[int, int], ...] = BTD_PAIRS
+) -> np.ndarray:
+    btd = np.stack([data[i] - data[j] for i, j in pairs])
     return np.concatenate([data, btd], axis=0)
 
 
 def input_channel_count(config: "Config", satellite: str) -> int:
     count = len(get_band_mapping(config)[satellite])
     if uses_btd(config):
-        count += len(BTD_PAIRS)
+        count += len(btd_pairs_for(config, satellite))
     return count
 
 
@@ -189,6 +205,8 @@ class Config:
     decoder_channels: int = 192
     batch_size: int = 8
     epochs: int = 30
+    early_stopping_patience: int | None = None
+    early_stopping_min_epochs: int = 1
     n_folds: int = 5
     lr_encoder: float = 5e-5
     lr_head: float = 2e-4
@@ -198,6 +216,9 @@ class Config:
     heavy_rain_weight_alpha: float = 0.5
     heavy_rain_weight_scale: float = 10.0
     heavy_rain_weight_max: float = 2.0
+    raw_huber_loss_weight: float = 0.0
+    raw_huber_beta: float = 5.0
+    raw_huber_max: float = 100.0
     use_two_head: bool = False
     rain_bce_weight_0_1: float = 0.10
     rain_bce_weight_1: float = 0.10
@@ -539,6 +560,8 @@ def get_band_mapping(config: Config) -> dict[str, tuple[int, ...]]:
         return LEGACY_THREE_BANDS
     if config.band_mode in ("matched6", "matched6_btd"):
         return SATELLITE_BANDS
+    if config.band_mode in ("full16", "full16_btd"):
+        return FULL16_BANDS
     raise ValueError(f"Unknown band_mode: {config.band_mode}")
 
 
@@ -550,6 +573,7 @@ def compute_band_stats(
     band_mapping: dict[str, tuple[int, ...]] | None = None,
     include_shared: bool = False,
     append_btd: bool = False,
+    btd_pairs_by_satellite: dict[str, tuple[tuple[int, int], ...]] | None = None,
 ) -> dict[str, dict[str, np.ndarray]]:
     """Compute fold-train-only statistics for matched physical channels."""
     band_mapping = band_mapping or SATELLITE_BANDS
@@ -565,7 +589,8 @@ def compute_band_stats(
             rows = rows.sample(max_samples_per_satellite, random_state=seed)
 
         bands = band_mapping[satellite]
-        channel_count = len(bands) + (len(BTD_PAIRS) if append_btd else 0)
+        btd_pairs = (btd_pairs_by_satellite or {}).get(satellite, BTD_PAIRS)
+        channel_count = len(bands) + (len(btd_pairs) if append_btd else 0)
         sums = np.zeros(channel_count, dtype=np.float64)
         squared_sums = np.zeros_like(sums)
         counts = np.zeros_like(sums)
@@ -590,7 +615,7 @@ def compute_band_stats(
                 if not data.any():
                     continue
                 if append_btd:
-                    data = append_btd_channels(data)
+                    data = append_btd_channels(data, btd_pairs)
                 flat = data.reshape(data.shape[0], -1)
                 sums += flat.sum(axis=1)
                 squared_sums += np.square(flat).sum(axis=1)
@@ -697,7 +722,9 @@ class NowcastingDataset(Dataset):
                 dtype=np.float32,
             )
         if uses_btd(self.config):
-            data = append_btd_channels(data)
+            data = append_btd_channels(
+                data, btd_pairs_for(self.config, satellite)
+            )
         stats_key = satellite if self.config.use_satellite_normalization else "shared"
         mean = self.stats[stats_key]["mean"][:, None, None]
         std = self.stats[stats_key]["std"][:, None, None]
@@ -853,10 +880,11 @@ class SatelliteStem(nn.Module):
     def forward(self, image: torch.Tensor, satellite_id: torch.Tensor) -> torch.Tensor:
         outputs = []
         indices = []
+        # Keep routing IDs on CPU for MPS.  MPS advanced indexing accepts CPU
+        # LongTensors, while repeatedly running nonzero on MPS can lose IDs.
+        routing_ids = satellite_id.cpu() if satellite_id.device.type == "mps" else satellite_id
         for identifier, stem in enumerate(self.stems):
-            index = torch.nonzero(
-                satellite_id == identifier, as_tuple=False
-            ).flatten()
+            index = torch.nonzero(routing_ids == identifier, as_tuple=False).flatten()
             if len(index):
                 outputs.append(stem(image[index]))
                 indices.append(index)
@@ -1111,7 +1139,8 @@ class SwinNowcaster(nn.Module):
             missing_flag = torch.zeros_like(missing_flag)
         condition = self.context_mlp(torch.cat([context, missing_flag], dim=1))
         if self.config.use_satellite_embedding:
-            condition = condition + self.satellite_embedding(satellite_id)
+            embedding_id = satellite_id.to(condition.device, non_blocking=True)
+            condition = condition + self.satellite_embedding(embedding_id)
         decoded = decoded + condition[:, :, None, None]
         output = self.head(decoded)
         output = F.interpolate(
@@ -1274,6 +1303,26 @@ def compute_training_loss(
             sample_loss = weighted_element_loss.flatten(1).mean(dim=1)
             base_loss = (sample_loss * sample_weight).sum() / weight_denominator
 
+    if config.raw_huber_loss_weight > 0:
+        prediction_original = torch.expm1(predictions).clamp(
+            min=0, max=config.raw_huber_max
+        )
+        target_original = torch.expm1(targets).clamp(
+            min=0, max=config.raw_huber_max
+        )
+        raw_element_loss = F.smooth_l1_loss(
+            prediction_original,
+            target_original,
+            beta=config.raw_huber_beta,
+            reduction="none",
+        )
+        if sample_weight is None:
+            raw_loss = raw_element_loss.mean()
+        else:
+            raw_sample_loss = raw_element_loss.flatten(1).mean(dim=1)
+            raw_loss = (raw_sample_loss * sample_weight).sum() / weight_denominator
+        base_loss = base_loss + config.raw_huber_loss_weight * raw_loss
+
     if not config.use_two_head:
         return base_loss
     if rain_logits is None:
@@ -1328,7 +1377,11 @@ def train_fold(
             train_directories,
             config.stats_samples_per_satellite,
             config.seed + fold["fold"],
+            band_mapping=get_band_mapping(config),
             append_btd=uses_btd(config),
+            btd_pairs_by_satellite={
+                satellite: btd_pairs_for(config, satellite) for satellite in SATELLITES
+            },
         )
         save_stats(stats, stats_path)
 
@@ -1410,6 +1463,7 @@ def train_fold(
     checkpoint_path = config.model_dir / f"best_fold{fold['fold']}.pth"
     history = []
     best_rmse = float("inf")
+    epochs_without_improvement = 0
 
     for epoch in range(1, config.epochs + 1):
         model.train()
@@ -1419,7 +1473,8 @@ def train_fold(
             train_loader, desc=f"Fold {fold['fold']} epoch {epoch}", leave=False
         ):
             image = image.to(device, non_blocking=True)
-            satellite_id = satellite_id.to(device, non_blocking=True)
+            if device.type != "mps":
+                satellite_id = satellite_id.to(device, non_blocking=True)
             temporal = temporal.to(device, non_blocking=True)
             missing = missing.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
@@ -1471,7 +1526,8 @@ def train_fold(
         with torch.no_grad():
             for image, satellite_id, temporal, missing, target, _ in validation_loader:
                 image = image.to(device, non_blocking=True)
-                satellite_id = satellite_id.to(device, non_blocking=True)
+                if device.type != "mps":
+                    satellite_id = satellite_id.to(device, non_blocking=True)
                 temporal = temporal.to(device, non_blocking=True)
                 missing = missing.to(device, non_blocking=True)
                 prediction = model(image, satellite_id, temporal, missing).cpu()
@@ -1503,6 +1559,7 @@ def train_fold(
 
         if validation_rmse < best_rmse:
             best_rmse = validation_rmse
+            epochs_without_improvement = 0
             torch.save(
                 {
                     "config": asdict(config),
@@ -1517,6 +1574,20 @@ def train_fold(
                 },
                 checkpoint_path,
             )
+        else:
+            epochs_without_improvement += 1
+
+        if (
+            config.early_stopping_patience is not None
+            and epoch >= config.early_stopping_min_epochs
+            and epochs_without_improvement >= config.early_stopping_patience
+        ):
+            print(
+                f"early-stop: fold={fold['fold']} epoch={epoch:02d} "
+                f"best_rmse={best_rmse:.5f} "
+                f"patience={config.early_stopping_patience}"
+            )
+            break
 
     history_frame = pd.DataFrame(history)
     history_frame.to_csv(
@@ -1605,7 +1676,8 @@ def predict_fold(
             loader, desc=f"Inference fold {fold}"
         ):
             image = image.to(device, non_blocking=True)
-            satellite_id = satellite_id.to(device, non_blocking=True)
+            if device.type != "mps":
+                satellite_id = satellite_id.to(device, non_blocking=True)
             temporal = temporal.to(device, non_blocking=True)
             missing = missing.to(device, non_blocking=True)
             if tta:

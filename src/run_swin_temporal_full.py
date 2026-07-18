@@ -39,12 +39,33 @@ def parse_folds(value: str) -> list[int]:
     return [int(part.strip()) for part in value.split(",") if part.strip()]
 
 
+def load_folds_json(path: Path, row_count: int) -> list[dict]:
+    raw_folds = json.loads(path.read_text())
+    folds = []
+    for raw in raw_folds:
+        train = np.asarray(raw["train_indices"], dtype=np.int64)
+        validation = np.asarray(raw["validation_indices"], dtype=np.int64)
+        if train.size + validation.size != row_count:
+            raise ValueError(f"Fold {raw['fold']} does not cover the dataframe")
+        if np.intersect1d(train, validation).size:
+            raise ValueError(f"Fold {raw['fold']} overlaps train and validation rows")
+        folds.append(
+            {
+                "fold": int(raw["fold"]),
+                "train_indices": train,
+                "validation_indices": validation,
+                "validation_locations": list(raw["validation_locations"]),
+            }
+        )
+    return sorted(folds, key=lambda fold: fold["fold"])
+
+
 def run(args: argparse.Namespace) -> Path:
     root = Path(args.root).resolve()
     if args.kaggle_input_root:
         ensure_kaggle_workspace(root, Path(args.kaggle_input_root))
 
-    write_stats_dir = root / "outputs" / "band_stats"
+    write_stats_dir = root / "outputs" / args.model_subdir / "band_stats"
     write_stats_dir.mkdir(parents=True, exist_ok=True)
     if args.band_stats_root:
         read_stats_dir = Path(args.band_stats_root)
@@ -60,12 +81,17 @@ def run(args: argparse.Namespace) -> Path:
         max_observations=3 * (1 + context_steps),
         batch_size=args.batch_size,
         epochs=args.epochs,
+        early_stopping_patience=args.early_stopping_patience,
+        early_stopping_min_epochs=args.early_stopping_min_epochs,
         lr_encoder=args.lr_encoder,
         lr_head=args.lr_head,
         loss_type=args.loss_type,
         heavy_rain_weight_alpha=args.heavy_rain_weight_alpha,
         heavy_rain_weight_scale=args.heavy_rain_weight_scale,
         heavy_rain_weight_max=args.heavy_rain_weight_max,
+        raw_huber_loss_weight=args.raw_huber_loss_weight,
+        raw_huber_beta=args.raw_huber_beta,
+        raw_huber_max=args.raw_huber_max,
         use_two_head=args.use_two_head,
         rain_bce_weight_0_1=args.rain_bce_weight_0_1,
         rain_bce_weight_1=args.rain_bce_weight_1,
@@ -75,8 +101,8 @@ def run(args: argparse.Namespace) -> Path:
         seed=args.seed,
         pretrained=not args.no_pretrained,
         use_amp=not args.no_amp,
-        use_temporal_differences=True,
-        use_temporal_summary=True,
+        use_temporal_differences=not args.disable_temporal_features,
+        use_temporal_summary=not args.disable_temporal_features,
         use_temporal_frame_attention=getattr(args, "temporal_frame_attention", False),
         use_location_features=args.use_location_features,
         location_metadata_path=args.location_metadata_path,
@@ -103,7 +129,11 @@ def run(args: argparse.Namespace) -> Path:
         print(f"align-frames: repaired {repaired} frame-deficient rows")
     if context_steps:
         dataframe = extend_temporal_context(dataframe, context_steps)
-    folds = make_folds(dataframe, config.n_folds)
+    folds = (
+        load_folds_json(args.folds_json, len(dataframe))
+        if args.folds_json
+        else make_folds(dataframe, config.n_folds)
+    )
     if getattr(args, "exclude_bad_labels", False):
         bad_mask = (
             (dataframe["datetime"] == pd.Timestamp("2023-01-01 00:00:00"))
@@ -147,7 +177,10 @@ def main() -> None:
     parser.add_argument("--root", default="/kaggle/working")
     parser.add_argument("--kaggle-input-root", default=None)
     parser.add_argument("--folds", default="0")
+    parser.add_argument("--folds-json", type=Path, default=None)
     parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--early-stopping-patience", type=int, default=None)
+    parser.add_argument("--early-stopping-min-epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr-encoder", type=float, default=2e-5)
     parser.add_argument("--lr-head", type=float, default=1e-4)
@@ -157,6 +190,9 @@ def main() -> None:
     parser.add_argument("--heavy-rain-weight-alpha", type=float, default=0.5)
     parser.add_argument("--heavy-rain-weight-scale", type=float, default=10.0)
     parser.add_argument("--heavy-rain-weight-max", type=float, default=2.0)
+    parser.add_argument("--raw-huber-loss-weight", type=float, default=0.0)
+    parser.add_argument("--raw-huber-beta", type=float, default=5.0)
+    parser.add_argument("--raw-huber-max", type=float, default=100.0)
     parser.add_argument("--use-two-head", action="store_true")
     parser.add_argument("--rain-bce-weight-0-1", type=float, default=0.10)
     parser.add_argument("--rain-bce-weight-1", type=float, default=0.10)
@@ -171,12 +207,17 @@ def main() -> None:
     parser.add_argument("--location-feature-mode", default="full", choices=["full", "local_time"])
     parser.add_argument("--sample-weight-path", default=None)
     parser.add_argument("--sample-weight-column", default="weight_sqrt_clipped")
-    parser.add_argument("--band-mode", default="matched6", choices=["legacy3", "matched6", "matched6_btd"])
+    parser.add_argument(
+        "--band-mode",
+        default="matched6",
+        choices=["legacy3", "matched6", "matched6_btd", "full16", "full16_btd"],
+    )
     parser.add_argument("--encoder-name", default="swin_tiny_patch4_window7_224")
     parser.add_argument("--flow-divergence", action="store_true")
     parser.add_argument("--flow-extrapolation", action="store_true")
     parser.add_argument("--temporal-context-steps", type=int, default=0)
     parser.add_argument("--temporal-frame-attention", action="store_true")
+    parser.add_argument("--disable-temporal-features", action="store_true")
     parser.add_argument("--pseudo-label-npz", default=None)
     parser.add_argument("--pseudo-label-csv", default=None)
     parser.add_argument("--pseudo-sample-weight", type=float, default=1.0)
